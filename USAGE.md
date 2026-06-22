@@ -21,9 +21,11 @@ Don't go sub-minute: the clock is minute-resolution, so faster only adds ghostin
 
 If a fetch fails (Wi-Fi blip, renderer restart) the **last good frame stays up** and it retries next cycle.
 
-## Power
+## Power & staying awake
 
 Preventing the screensaver + keeping Wi-Fi on drains faster than reading. For a wall dashboard, leave it on a USB charger — then it runs indefinitely.
+
+`preventScreenSaver` (re-asserted every cycle) stops the screensaver, but the stock UI's **idle timer can still suspend/lock** the device. For a true never-sleep kiosk, launch with **`STOP_FRAMEWORK=1`** — it stops the Kindle UI so nothing puts the device to sleep. Trade-off: the normal Kindle interface is gone until you **Stop** the dashboard (which restarts it) or reboot. With KUAL, set it by exporting the var in `start.sh`, e.g. `STOP_FRAMEWORK=1 sh /mnt/us/documents/dashboard.sh`.
 
 ## Survive reboots
 

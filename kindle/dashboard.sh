@@ -16,6 +16,10 @@ URL="${DASH_URL:-http://CHANGE-ME.lan/dash.png?rotate=90}"
 IMG="/tmp/dash.png"
 LOG="${LOG:-/tmp/kindle-dash.log}"
 FULL_EVERY=30      # full flashing refresh every N cycles (here: 30 min) to de-ghost
+# 1 = stop the stock Kindle UI so its idle timer can't suspend/lock the device
+# (the real never-sleep fix for a wall dashboard). Reversible: cleanup restarts
+# it, or reboot. Leave 0 if you still want the normal UI available.
+STOP_FRAMEWORK="${STOP_FRAMEWORK:-0}"
 # Refresh once per minute, aligned to the top of the minute (see loop below) so
 # the clock flips with the wall clock instead of drifting up to ~2 min behind.
 
@@ -56,6 +60,7 @@ paint() {  # $1 = 1 for a full flashing refresh, 0 for a fast partial one
 # clear the screen so the Kindle returns to normal without a reboot.
 cleanup() {
   lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+  [ "$STOP_FRAMEWORK" = 1 ] && { start lab126_gui 2>/dev/null || /etc/init.d/framework start 2>/dev/null; }
   command -v eips >/dev/null 2>&1 && eips -c 2>/dev/null
   exit 0
 }
@@ -63,12 +68,19 @@ trap cleanup TERM INT
 
 # Keep the screen from blanking while the dashboard is up.
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
+# Kiosk mode: stop the stock UI so it can't idle-suspend/lock the device.
+# (Command varies by firmware; try both. Reverse in cleanup.)
+if [ "$STOP_FRAMEWORK" = 1 ]; then
+  stop lab126_gui 2>/dev/null || /etc/init.d/framework stop 2>/dev/null
+fi
 
 i=0
 while true; do
   if curl -s -m 30 -o "$IMG" "$URL"; then
     if [ $((i % FULL_EVERY)) -eq 0 ]; then paint 1; else paint 0; fi
   fi
+  # re-assert each cycle — the framework can reset it after a while
+  lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
   # else: keep the last frame up; retry next cycle (Wi-Fi blip, renderer reboot)
   i=$((i + 1))
   # Sleep until the top of the next minute so the clock stays in sync. Strip a
