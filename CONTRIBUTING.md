@@ -1,0 +1,35 @@
+# Contributing
+
+PRs and issues welcome. It's a small project — keep changes focused and the dashboard's "fail soft, never a broken frame" contract intact.
+
+## Dev shell (devenv + direnv)
+
+The repo ships a [devenv](https://devenv.sh) shell (Python + Pillow/requests, `ruff`, `docker-compose`, fonts wired in).
+
+```bash
+# one-time: install devenv + direnv, then in the repo:
+direnv allow          # or: devenv shell
+```
+
+Scripts available in the shell:
+
+| Script | What |
+|---|---|
+| `preview` | render one frame to `./preview.png` (uses your local env; great for layout work) |
+| `serve` | run the renderer on `:8080` |
+| `fmt` | `ruff format` the renderer |
+| `lint` | `ruff check` the renderer |
+
+Iterate on layout/widgets with `preview` — no container, no Kindle needed. Set `HA_*` / `CLAUDE_*` in your shell to exercise live sources, or monkeypatch the `fetch_*` functions in a scratch script.
+
+## Conventions
+
+- **Widgets**: optional (no config → hidden), fail soft (return `None`, never raise out of a widget). See [WIDGETS.md](WIDGETS.md).
+- **Style**: pure black on white; size fonts off the box height; `ruff` clean.
+- **Device scripts** (`kindle/`): POSIX `sh` only — the Kindle runs **busybox ash**. No bashisms (`10#`, `[[ ]]`, arrays). Check with `sh -n`.
+- **Commits**: Conventional Commits (`feat`, `fix`, `docs`, …). No AI co-author trailers.
+- **Secrets**: never commit `.env` or tokens.
+
+## Scope
+
+Core stays small and dependency-light (Pillow + requests). New data sources belong in widgets, not the core. Big layout ideas (portrait mode, multi-screen rotation) are welcome — open an issue first so we agree on the shape.

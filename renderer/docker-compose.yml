@@ -1,0 +1,27 @@
+# kindle-dash renderer — standalone compose.
+#
+# Builds the image and serves the dashboard on :8810. The Kindle fetches
+# GET /dash.png from here. NOTE: a jailbroken Kindle's TLS stack is too old for
+# modern HTTPS, so it must reach the renderer over PLAIN HTTP. On a trusted LAN
+# the published port below is enough; to put it behind a hostname / reverse
+# proxy (still plain HTTP for the device), see deploy/ and docs/INSTALLATION.md.
+services:
+  kindle-dash:
+    build: .
+    image: kindle-dash:latest
+    container_name: kindle-dash
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - kindle_dash_data:/data
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${PORT:-8810}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').read()==b'ok' else 1)\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  kindle_dash_data:

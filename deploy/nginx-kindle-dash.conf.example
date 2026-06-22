@@ -1,0 +1,31 @@
+# Optional reverse-proxy example (nginx; adapt to Caddy/Traefik/etc.).
+#
+# Why plain HTTP: a jailbroken Kindle's TLS stack can't do modern HTTPS/SNI, so
+# the dashboard vhost is deliberately served on :80 with NO TLS, restricted to
+# the LAN. A normal browser auto-upgrades http->https; if you also want browser
+# access, add a `listen 443 ssl;` with a cert that covers this hostname (the
+# Kindle keeps using plain :80).
+#
+# Point your DNS (e.g. a local resolver / rewrite) for this hostname at the host
+# running the proxy. Then set DASH_URL on the device to
+# http://kindle-dash.example.lan/dash.png?rotate=90
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name kindle-dash.*;
+
+    # No TLS, no auth on this vhost — keep it on the LAN only.
+    allow 192.168.0.0/16;
+    allow 10.0.0.0/8;
+    deny all;
+
+    location / {
+        # If the renderer runs as a container on the same network, use its name;
+        # otherwise set this to the renderer host:port.
+        set $upstream "kindle-dash:8080";
+        proxy_pass http://$upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}

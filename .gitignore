@@ -1,0 +1,20 @@
+# secrets / local config
+.env
+*.env.sops
+data/
+
+# devenv / direnv / nix
+.devenv/
+.devenv.flake.nix
+devenv.local.nix
+.direnv/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# render artifacts
+preview.png
+*.png
+!docs/**/*.png

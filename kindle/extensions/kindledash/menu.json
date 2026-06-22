@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "name": "Kindle Dashboard",
+      "priority": 0,
+      "items": [
+        {
+          "name": "Start",
+          "priority": 1,
+          "action": "/bin/sh",
+          "params": "/mnt/us/extensions/kindledash/start.sh",
+          "exitmenu": true
+        },
+        {
+          "name": "Stop",
+          "priority": 2,
+          "action": "/bin/sh",
+          "params": "/mnt/us/extensions/kindledash/stop.sh",
+          "exitmenu": true
+        }
+      ]
+    }
+  ]
+}
