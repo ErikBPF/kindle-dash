@@ -9,10 +9,10 @@
 #
 # SET THIS URL to wherever the renderer is reachable from the Kindle. The
 # Kindle's ancient TLS can't do modern HTTPS, so serve plain HTTP (see
-# docs/INSTALLATION.md for a reverse-proxy example). rotate=90 pre-rotates the
-# landscape frame to fill a portrait framebuffer — mount the device sideways
-# (use rotate=270 if it lands upside down; drop ?rotate= for a desktop browser).
-URL="${DASH_URL:-http://CHANGE-ME.lan/dash.png?rotate=90}"
+# INSTALLATION.md for a reverse-proxy example). All visual options — rotation,
+# dark mode, which widgets — are set on the RENDERER (container env), so the
+# device just opens the bare link.
+URL="${DASH_URL:-http://CHANGE-ME.lan/dash.png}"
 IMG="/tmp/dash.png"
 LOG="${LOG:-/tmp/kindle-dash.log}"
 FULL_EVERY=30      # full flashing refresh every N cycles (here: 30 min) to de-ghost

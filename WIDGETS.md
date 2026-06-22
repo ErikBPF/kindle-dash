@@ -27,7 +27,32 @@ Then give it a box in `render()`:
 w_aqi(d, (mid, mid_y, rcol, (mid_b - mid_y) * 0.5))
 ```
 
-Conventions: pure black on white (e-ink is sharpest at 1-bit); size fonts as a fraction of `h`; truncate text with `_trunc()`; never raise out of a widget (a thrown widget shouldn't break the whole frame — wrap risky fetches).
+Conventions: pure black on white (e-ink is sharpest at 1-bit — `DASH_DARK` inverts the whole frame for you, so always draw dark-on-light); size fonts as a fraction of `h`; truncate text with `_trunc()`; never raise out of a widget (one that raises is logged and skipped, but keep fetches fail-soft anyway).
+
+## Turning widgets on/off
+
+`DASH_WIDGETS` (env) lists which panels render, in order — drop any to hide it, e.g. `DASH_WIDGETS=clock,weather,usage`. No code change. Each name maps to a fixed box in `render()`.
+
+## Data sources — Home Assistant is *one* of them, not the only one
+
+The data widgets (weather, forecast, sun, agenda) currently fetch from **Home Assistant** via the `_ha()` helper — that's the shipped integration, not a requirement of the design. The data layer is just a `fetch_*()` returning a fixed shape; the `w_*()` that draws it doesn't care where the data came from. (The Claude-usage widget already proves this — it's a direct API integration, no HA.)
+
+To add another integration, write a fetch variant for your source and dispatch on an env var, keeping HA as one branch:
+
+```python
+WEATHER_PROVIDER = os.environ.get("WEATHER_PROVIDER", "ha")
+
+def fetch_weather():
+    if WEATHER_PROVIDER == "open-meteo":
+        return _weather_open_meteo()   # lat/lon, no API key
+    return _weather_ha()               # the shipped default
+```
+
+Good HA-free candidates:
+- **Weather + forecast + sun → [Open-Meteo](https://open-meteo.com)** — free, keyless; one GET returns current, daily hi/lo, and sunrise/sunset. Covers three widgets with just a lat/lon.
+- **Agenda → an `.ics` URL** — Google/Outlook/Apple all publish one. Recurring events need an ICS library (`icalendar` + recurrence expansion).
+
+Return shapes to match: weather `(condition, temp, feels)` · forecast `[(label, condition, hi, lo), …]` · sun `(sunrise_dt, sunset_dt)` · agenda `[(time_label, summary), …]`. Return `None` on any failure.
 
 ## Shipped in v1
 

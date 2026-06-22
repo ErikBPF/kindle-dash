@@ -8,8 +8,13 @@ All renderer config is environment variables (in `renderer/.env`; see `.env.exam
 |---|---|---|
 | `KINDLE_W` / `KINDLE_H` | `1024` / `758` | **Landscape** (width ≥ height). Must match your panel — check `cat /sys/class/graphics/fb0/virtual_size` on the device. PW2 = `1024×758`, PW3+/Oasis = `1448×1072`. |
 | `TZ` | `UTC` | IANA tz, e.g. `America/Sao_Paulo`. Drives the clock + all formatted times. |
+| `DASH_ROTATE` | `0` | `0/90/180/270`. Rotates the frame **server-side** — `90` fills a portrait panel mounted sideways (`270` if upside down). |
+| `DASH_DARK` | `0` | `1` = light-on-black (e-ink dark mode; the whole frame is inverted). |
+| `DASH_WIDGETS` | all | Comma list of panels to draw, in order: `clock,weather,forecast,agenda,sunmoon,usage`. Drop any to hide it. |
 | `PORT` | `8810` | Host port the container publishes (compose). |
 | `DASH_FONT_DIR` | `/usr/share/fonts/truetype/dejavu` | Where the DejaVu TTFs live (the image ships them). |
+
+> **All visual options live here, not on the device.** Rotation, dark mode, and the widget set are container env — the Kindle only ever opens the bare `GET /dash.png`. Change a knob, recreate the container, done; nothing to touch on the Kindle.
 
 ## Home Assistant (weather · forecast · sun · agenda)
 

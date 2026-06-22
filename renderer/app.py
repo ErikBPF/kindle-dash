@@ -30,13 +30,25 @@ from io import BytesIO
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # --- config ----------------------------------------------------------------
 KINDLE_W = int(os.environ.get("KINDLE_W", "1024"))
 KINDLE_H = int(os.environ.get("KINDLE_H", "758"))
 TZ = os.environ.get("TZ", "UTC")
 TZINFO = zoneinfo.ZoneInfo(TZ)
+
+# Visual options are server-side (container env) so the device just opens
+# /dash.png with no query string. DASH_ROTATE spins the frame for sideways
+# mounting (0/90/180/270); DASH_DARK inverts to light-on-black; DASH_WIDGETS
+# picks which panels render, in order.
+DASH_ROTATE = int(os.environ.get("DASH_ROTATE", "0"))
+DASH_DARK = os.environ.get("DASH_DARK", "0").lower() in ("1", "true", "yes", "on")
+DASH_WIDGETS = [
+    w.strip()
+    for w in os.environ.get("DASH_WIDGETS", "clock,weather,forecast,agenda,sunmoon,usage").split(",")
+    if w.strip()
+]
 
 # Home Assistant (optional) — powers weather, forecast, sun, and agenda widgets.
 HA_BASE_URL = os.environ.get("HA_BASE_URL", "").rstrip("/")
@@ -491,36 +503,51 @@ def w_usage(d, box):
         d.text((bx1 + 16, ry), txt, font=f, fill=0)
 
 
-def render(rotate=0):
+WIDGET_FNS = {
+    "clock": w_clock, "weather": w_weather, "agenda": w_agenda,
+    "forecast": w_forecast, "sunmoon": w_sunmoon, "usage": w_usage,
+}
+
+
+def render(rotate=None):
+    # rotate: None → use DASH_ROTATE (the container setting). A ?rotate= query
+    # can still override per-request, but the device never needs to.
+    if rotate is None:
+        rotate = DASH_ROTATE
     W, H = KINDLE_W, KINDLE_H
     img = Image.new("L", (W, H), 255)
     d = ImageDraw.Draw(img)
     pad = max(16, W // 42)
 
-    # --- layout grid: each (widget, box) draws into its box; add/move/resize
-    # here. Widgets are isolated — one that raises is logged and skipped, never
-    # taking down the whole frame.
+    # --- layout grid: box per widget name; DASH_WIDGETS picks which to draw.
+    # Widgets are isolated — one that raises is logged and skipped, never taking
+    # down the whole frame.
     hdr_h = H * 0.20
     mid_y, mid_b = H * 0.26, H * 0.60
     mid = W * 0.52
     rcol = W - mid - pad
     midrow = mid_b - mid_y
-    layout = [
-        (w_clock, (pad, pad, mid - pad, hdr_h)),
-        (w_weather, (mid, pad, rcol, hdr_h)),
-        (w_agenda, (pad, mid_y, mid - 2 * pad, midrow)),
-        (w_forecast, (mid, mid_y, rcol, midrow * 0.45)),
-        (w_sunmoon, (mid, mid_y + midrow * 0.5, rcol, midrow * 0.5)),
-        (w_usage, (pad, mid_b + 2 * pad, W - 2 * pad, H - (mid_b + 2 * pad) - pad)),
-    ]
+    boxes = {
+        "clock": (pad, pad, mid - pad, hdr_h),
+        "weather": (mid, pad, rcol, hdr_h),
+        "agenda": (pad, mid_y, mid - 2 * pad, midrow),
+        "forecast": (mid, mid_y, rcol, midrow * 0.45),
+        "sunmoon": (mid, mid_y + midrow * 0.5, rcol, midrow * 0.5),
+        "usage": (pad, mid_b + 2 * pad, W - 2 * pad, H - (mid_b + 2 * pad) - pad),
+    }
     d.line((pad, H * 0.235, W - pad, H * 0.235), fill=0, width=2)
     d.line((pad, mid_b + pad, W - pad, mid_b + pad), fill=0, width=2)
-    for fn, box in layout:
+    for name in DASH_WIDGETS:
+        fn, box = WIDGET_FNS.get(name), boxes.get(name)
+        if not (fn and box):
+            continue
         try:
             fn(d, box)
         except Exception as e:
-            print(f"[widget] {fn.__name__} failed: {e}", flush=True)
+            print(f"[widget] {name} failed: {e}", flush=True)
 
+    if DASH_DARK:
+        img = ImageOps.invert(img)  # light-on-black for e-ink dark mode
     if rotate in (90, 180, 270):
         img = img.rotate(rotate, expand=True)
     buf = BytesIO()
@@ -539,10 +566,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"ok")
             return
         if self.path.startswith("/dash.png"):
-            try:
-                rotate = int(parse_qs(urlparse(self.path).query).get("rotate", ["0"])[0])
+            q = parse_qs(urlparse(self.path).query)
+            try:  # optional per-request override; device omits it and gets DASH_ROTATE
+                rotate = int(q["rotate"][0]) if "rotate" in q else None
             except ValueError:
-                rotate = 0
+                rotate = None
             try:
                 png = render(rotate)
             except Exception as e:
