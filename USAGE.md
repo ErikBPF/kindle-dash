@@ -40,7 +40,7 @@ Have your jailbreak's boot hook run `sh /mnt/us/extensions/kindledash/start.sh` 
 | `eips: not found` | rare; confirm you're on a jailbroken Kindle, or drop `fbink` at `/mnt/us/fbink`. |
 | Image **clipped / sideways** | resolution mismatch (`KINDLE_W/H`) or wrong `?rotate=` (try 90 vs 270). |
 | Browser **redirects to https** | your browser auto-upgrades http→https; the device (curl) is unaffected. Add a `:443` vhost if you want browser access. |
-| `(stale)` on the usage panel | renderer hasn't fetched usage recently — check its logs (`docker logs kindle-dash`); often a token issue (see [SECURITY.md](SECURITY.md)). |
+| `(stale)` on a usage panel | renderer hasn't fetched recently — check `docker logs kindle-dash`. Claude/Codex: usually a token issue. **opencode**: its cookie expired (it has no refresh) — re-capture with `tools/opencode-capture.py` and re-seed (see [SECURITY.md](SECURITY.md)). |
 | A panel shows a placeholder | its source isn't configured (or that fetch failed) — see [CONFIGURATION.md](CONFIGURATION.md). |
 
 Device logs go to `/tmp/kindle-dash.log` (kept off-screen). Renderer logs: `docker logs kindle-dash`.

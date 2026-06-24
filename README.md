@@ -1,6 +1,6 @@
 # kindle-dash
 
-Turn a dead/old jailbroken Kindle into a calm, glare-free **e-ink wall dashboard** — clock, weather, a 3-day forecast, today's agenda, sun & moon, and your live **Claude subscription usage** — rendered server-side and painted by the device on a timer.
+Turn a dead/old jailbroken Kindle into a calm, glare-free **e-ink wall dashboard** — clock, weather, a 3-day forecast, today's agenda, sun & moon, and your live **AI subscription usage** (Claude · Codex · opencode) — rendered server-side and painted by the device on a timer.
 
 > *Your Kindle didn't die. It ascended into furniture.*
 
@@ -17,7 +17,7 @@ No glowing rectangle, no app, no cloud account. A tiny container renders a grays
 - **Forecast** — next N days (hi/lo + icon).
 - **Agenda** — today's calendar events.
 - **Sun & moon** — sunrise/sunset + a computed moon-phase glyph.
-- **Claude usage** — real Session / Week / Sonnet limit %, straight from your subscription.
+- **AI usage** — live subscription limits side by side: Claude (Session/Week/Sonnet), Codex (Session/Week), opencode Go (5h/Week/Month). Columns size themselves to however many you enable.
 
 Every panel is optional. A panel with no data source configured just renders a quiet placeholder — never a broken image.
 
@@ -32,7 +32,7 @@ A 6-inch e-ink screen is the *perfect* ambient display: paper-like, sunlight-rea
   │  kindle-dash renderer (container, Python + Pillow)                   │
   │    • lays out a grid of WIDGETS, draws a grayscale PNG               │
   │    • pulls: Home Assistant (weather/forecast/sun/agenda)             │
-  │            Claude OAuth usage API (refreshes its own token)          │
+  │            Claude/Codex usage API + opencode dashboard scrape        │
   │    • serves GET /dash.png  (plain HTTP — the Kindle can't do TLS)    │
   └───────────────────────────────┬──────────────────────────────────────┘
                                    │  http (LAN)
@@ -66,12 +66,17 @@ Then set up the device (jailbreak, `dashboard.sh`, KUAL Start/Stop). Full walkth
 | [CONFIGURATION.md](CONFIGURATION.md) | every env var, data sources, resolution/rotation |
 | [USAGE.md](USAGE.md) | Start/Stop, refresh cadence, troubleshooting |
 | [WIDGETS.md](WIDGETS.md) | the roadmap + how to add your own widget |
-| [SECURITY.md](SECURITY.md) | the Claude-usage token caveats (read before enabling) |
+| [SECURITY.md](SECURITY.md) | usage-panel credential caveats — Claude/Codex tokens, opencode cookie (read before enabling) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | dev shell (devenv), conventions |
 
-## A word on the Claude usage panel
+## A word on the usage panels
 
-It works by calling Anthropic's **undocumented** OAuth usage endpoint with a token the renderer refreshes itself. Give the dashboard its **own** Claude login (not your laptop's) — refresh tokens rotate, and sharing one will eventually log the other out. The whole story is in [SECURITY.md](SECURITY.md). The panel is entirely optional; leave it unconfigured and it disappears.
+All three lean on **unofficial** plumbing — they're opt-in and disappear when unconfigured:
+
+- **Claude & Codex** call undocumented OAuth usage endpoints with a token the renderer refreshes itself. Give the dashboard its **own** login for each (not your laptop's) — refresh tokens rotate, and sharing one lineage eventually logs the other out.
+- **opencode** has **no usage API at all**, so that panel scrapes the Go dashboard HTML with a browser session cookie. The cookie expires every few days with no refresh path — re-grab it with `tools/opencode-capture.py` when the panel goes `(stale)`.
+
+The whole story (and how to seed each safely) is in [SECURITY.md](SECURITY.md).
 
 ## License & contributing
 

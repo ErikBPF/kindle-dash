@@ -10,7 +10,7 @@ All renderer config is environment variables (in `renderer/.env`; see `.env.exam
 | `TZ` | `UTC` | IANA tz, e.g. `America/Sao_Paulo`. Drives the clock + all formatted times. |
 | `DASH_ROTATE` | `0` | `0/90/180/270`. Rotates the frame **server-side** — `90` fills a portrait panel mounted sideways (`270` if upside down). |
 | `DASH_DARK` | `0` | `1` = light-on-black (e-ink dark mode; the whole frame is inverted). |
-| `DASH_WIDGETS` | all | Comma list of panels to draw, in order: `clock,weather,forecast,agenda,sunmoon,usage`. Drop any to hide it. |
+| `DASH_WIDGETS` | all | Comma list of panels to draw, in order: `clock,weather,forecast,agenda,sunmoon,usage`. Drop any to hide it. The usage providers (`usage`=Claude, `codex`, `opencode`) share the bottom strip and split it into one column each. |
 | `PORT` | `8810` | Host port the container publishes (compose). |
 | `DASH_FONT_DIR` | `/usr/share/fonts/truetype/dejavu` | Where the DejaVu TTFs live (the image ships them). |
 
@@ -46,6 +46,34 @@ Optional. **Read [SECURITY.md](SECURITY.md) first** — it's an undocumented API
 | `CLAUDE_STALE_AFTER_MIN` | `45` | after this with no successful fetch, the panel shows `(stale)` |
 
 The renderer persists rotated tokens to `/data/claude_tokens.json` (mount the volume so they survive restarts). The `CLAUDE_REFRESH_TOKEN` env is only a **seed** used on first run.
+
+## Codex usage (Session / Week)
+
+Optional. ChatGPT-subscription quota, via the same OAuth refresh pattern as Claude — give the dashboard its **own** `codex login` (token rotation would otherwise log your workstation out). Add `codex` to `DASH_WIDGETS`.
+
+| Var | Default | Notes |
+|---|---|---|
+| `CODEX_REFRESH_TOKEN` | — | seed from a dedicated login: `CODEX_HOME=$HOME/dash-codex-auth codex login`, then `jq -r .tokens.refresh_token $HOME/dash-codex-auth/auth.json`. Blank = panel off. |
+| `CODEX_POLL_MIN` | `15` | minutes between usage refreshes |
+| `CODEX_ACCOUNT_ID` | — | the `ChatGPT-Account-Id` header; auto-read from the id_token JWT, set only to override |
+| `CODEX_CLIENT_ID` | Codex CLI's public id | rarely changes |
+| `CODEX_TOKEN_URL` | `https://auth.openai.com/oauth/token` | token refresh endpoint |
+| `CODEX_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage` | usage endpoint |
+
+Reads `rate_limit.primary_window` (5h → Session) and `secondary_window` (weekly → Week). Rotated tokens persist to `/data/codex_tokens.json`; `CLAUDE_STALE_AFTER_MIN` also drives this panel's `(stale)` marker.
+
+## opencode Go usage (5h / Week / Month)
+
+Optional, and **fragile**: opencode has no usage API (tracked upstream — [Go #16017](https://github.com/anomalyco/opencode/issues/16017)), so this **scrapes the Go dashboard HTML** with your browser session cookie. The cookie expires (days) with no refresh path — when it dies the panel shows `(stale)` until you re-seed it. Add `opencode` to `DASH_WIDGETS`.
+
+| Var | Default | Notes |
+|---|---|---|
+| `OPENCODE_WORKSPACE_ID` | — | the `wrk_…` in the dashboard URL `/workspace/<id>/go`. Blank = panel off. |
+| `OPENCODE_AUTH_COOKIE` | — | the `auth` cookie for `opencode.ai` (DevTools → Application → Cookies). Re-seed when it expires. |
+| `OPENCODE_POLL_MIN` | `15` | minutes between scrapes |
+| `OPENCODE_GO_URL` | `https://opencode.ai/workspace/{ws}/go` | dashboard URL template (`{ws}` = workspace id) |
+
+Parses the `rollingUsage` / `weeklyUsage` / `monthlyUsage` objects (`usagePercent` + `resetInSec`) embedded in the page. If opencode changes the dashboard markup this breaks — the panel then renders `(stale)`/`usage n/a`, never a broken frame.
 
 ## Device (`dashboard.sh`)
 

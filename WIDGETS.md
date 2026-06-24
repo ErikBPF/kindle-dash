@@ -54,9 +54,11 @@ Good HA-free candidates:
 
 Return shapes to match: weather `(condition, temp, feels)` · forecast `[(label, condition, hi, lo), …]` · sun `(sunrise_dt, sunset_dt)` · agenda `[(time_label, summary), …]`. Return `None` on any failure.
 
-## Shipped in v1
+## Shipped
 
-Clock · Weather (now) · Forecast (N-day) · Agenda (HA calendar) · Sun & Moon (HA sun + local moon phase) · Claude usage (Session/Week/Sonnet).
+Clock · Weather (now) · Forecast (N-day) · Agenda (HA calendar) · Sun & Moon (HA sun + local moon phase) · Claude usage (Session/Week/Sonnet) · Codex usage (Session/Week) · opencode Go usage (5h/Week/Month).
+
+The three usage providers (`usage`=Claude, `codex`, `opencode`) share one `_usage_block` renderer and split the bottom strip into a column each. Claude and Codex read OAuth usage APIs (refresh-token seeded); **opencode has no usage API, so its widget scrapes the Go dashboard HTML** with a browser cookie — see CONFIGURATION.md for the fragility caveat.
 
 ## Roadmap — proposed widgets
 

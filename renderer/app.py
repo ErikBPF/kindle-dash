@@ -17,10 +17,13 @@ widget by writing a fetch + a w_ function and giving it a box (see WIDGETS.md).
 Everything is config via env (see CONFIGURATION.md / .env.example). All external
 fetches fail soft: a missing source renders a placeholder, never a broken image.
 """
+import base64
 import functools
+import html
 import json
 import math
 import os
+import re
 import threading
 import time
 import zoneinfo
@@ -77,6 +80,34 @@ STALE_AFTER_MIN = int(os.environ.get("CLAUDE_STALE_AFTER_MIN", "45"))
 USAGE_FILE = os.path.join(STATE_DIR, "claude_usage.json")
 TOKEN_FILE = os.path.join(STATE_DIR, "claude_tokens.json")
 FONT_DIR = os.environ.get("DASH_FONT_DIR", "/usr/share/fonts/truetype/dejavu")
+
+# Codex usage (optional) — ChatGPT-subscription quota via the same OAuth dance
+# as Claude: a seeded refresh token (its OWN `codex login`, see SECURITY.md)
+# mints short-lived access tokens, which rotate and persist to CODEX_TOKEN_FILE.
+# account_id (the ChatGPT-Account-Id header) is read from the id_token JWT.
+CODEX_REFRESH_TOKEN = os.environ.get("CODEX_REFRESH_TOKEN", "")
+CODEX_CLIENT_ID = os.environ.get("CODEX_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann")
+CODEX_TOKEN_URL = os.environ.get("CODEX_TOKEN_URL", "https://auth.openai.com/oauth/token")
+CODEX_USAGE_URL = os.environ.get("CODEX_USAGE_URL", "https://chatgpt.com/backend-api/wham/usage")
+CODEX_ACCOUNT_ID = os.environ.get("CODEX_ACCOUNT_ID", "")  # optional override
+CODEX_USER_AGENT = os.environ.get("CODEX_USER_AGENT", "codex_cli_rs/0.20.0")
+CODEX_POLL_MIN = int(os.environ.get("CODEX_POLL_MIN", "15"))
+CODEX_USAGE_FILE = os.path.join(STATE_DIR, "codex_usage.json")
+CODEX_TOKEN_FILE = os.path.join(STATE_DIR, "codex_tokens.json")
+
+# opencode Go usage (optional) — opencode exposes NO usage API (see WIDGETS.md),
+# so this scrapes the Go dashboard HTML, authenticated by a browser `auth`
+# cookie. The cookie expires (days) with no refresh path: when it dies the
+# widget renders "(stale)" until OPENCODE_AUTH_COOKIE is re-seeded.
+OPENCODE_WORKSPACE_ID = os.environ.get("OPENCODE_WORKSPACE_ID", "")
+OPENCODE_AUTH_COOKIE = os.environ.get("OPENCODE_AUTH_COOKIE", "")
+OPENCODE_GO_URL = os.environ.get("OPENCODE_GO_URL", "https://opencode.ai/workspace/{ws}/go")
+OPENCODE_USER_AGENT = os.environ.get(
+    "OPENCODE_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+)
+OPENCODE_POLL_MIN = int(os.environ.get("OPENCODE_POLL_MIN", "15"))
+OPENCODE_USAGE_FILE = os.path.join(STATE_DIR, "opencode_usage.json")
 
 
 @functools.lru_cache(maxsize=None)
@@ -216,9 +247,9 @@ def moon_phase(now):
 
 
 # --- Claude usage: OAuth token refresh + usage fetch -----------------------
-def read_usage():
+def read_usage(path=USAGE_FILE):
     try:
-        with open(USAGE_FILE) as f:
+        with open(path) as f:
             d = json.load(f)
         stale = datetime.now(timezone.utc) - datetime.fromisoformat(d["updated"]) > timedelta(
             minutes=STALE_AFTER_MIN
@@ -326,6 +357,171 @@ def usage_poll_loop():
         time.sleep(CLAUDE_POLL_MIN * 60)
 
 
+def _usage_poll(fetch_once, path, label, interval_min):
+    """Generic poll loop: fetch a usage record and cache it to `path`."""
+    while True:
+        try:
+            rec = fetch_once()
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(rec, f)
+            print(f"[{label}] ok", flush=True)
+        except Exception as e:
+            print(f"[{label}] fetch failed: {e}", flush=True)
+        time.sleep(interval_min * 60)
+
+
+def _reset_fmt(seconds=None, at=None):
+    """Format a reset time (relative seconds, or absolute epoch) as local text."""
+    try:
+        if seconds is not None:
+            dt = datetime.now(timezone.utc) + timedelta(seconds=int(seconds))
+        elif at is not None:
+            v = float(at)
+            if v > 2_000_000_000_000:  # milliseconds, not seconds
+                v /= 1000.0
+            dt = datetime.fromtimestamp(v, timezone.utc)
+        else:
+            return ""
+        return dt.astimezone(TZINFO).strftime("%b %d, %H:%M")
+    except Exception:
+        return ""
+
+
+# --- Codex usage: OAuth token refresh + ChatGPT-subscription usage fetch ----
+def _jwt_account_id(id_token):
+    """Pull chatgpt_account_id out of the OAuth id_token JWT payload."""
+    try:
+        payload = id_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+        return (data.get("https://api.openai.com/auth") or {}).get("chatgpt_account_id")
+    except Exception:
+        return None
+
+
+def _codex_load_tokens():
+    try:
+        with open(CODEX_TOKEN_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"refresh_token": CODEX_REFRESH_TOKEN, "access_token": "",
+                "expires_at": 0, "account_id": CODEX_ACCOUNT_ID}
+
+
+def _codex_save_tokens(tok):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = CODEX_TOKEN_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(tok, f)
+    os.replace(tmp, CODEX_TOKEN_FILE)
+
+
+def _codex_refresh(tok):
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": tok["refresh_token"],
+        "client_id": CODEX_CLIENT_ID,
+    }
+    hdrs = {"User-Agent": CODEX_USER_AGENT}
+    r = requests.post(CODEX_TOKEN_URL, json=payload, headers=hdrs, timeout=15)
+    if r.status_code >= 400:  # some OAuth servers want form-encoding, not JSON
+        r = requests.post(CODEX_TOKEN_URL, data=payload, headers=hdrs, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    tok["access_token"] = d["access_token"]
+    if d.get("refresh_token"):  # rotates — keep the new one or we lock ourselves out
+        tok["refresh_token"] = d["refresh_token"]
+    if d.get("id_token"):
+        aid = _jwt_account_id(d["id_token"])
+        if aid:
+            tok["account_id"] = aid
+    tok["expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=int(d.get("expires_in", 3600)))
+    ).timestamp()
+    _codex_save_tokens(tok)
+    return tok
+
+
+def _codex_token():
+    tok = _codex_load_tokens()
+    if not tok.get("refresh_token"):
+        raise RuntimeError("no refresh token seeded (CODEX_REFRESH_TOKEN)")
+    if not tok.get("access_token") or tok.get("expires_at", 0) < datetime.now(timezone.utc).timestamp() + 120:
+        tok = _codex_refresh(tok)
+    return tok
+
+
+def fetch_codex_usage_once():
+    def get(tok):
+        hdrs = {"Authorization": f"Bearer {tok['access_token']}", "User-Agent": CODEX_USER_AGENT}
+        if tok.get("account_id"):
+            hdrs["ChatGPT-Account-Id"] = tok["account_id"]
+        return requests.get(CODEX_USAGE_URL, headers=hdrs, timeout=15)
+
+    tok = _codex_token()
+    r = get(tok)
+    if r.status_code == 401:
+        r = get(_codex_refresh(_codex_load_tokens()))
+    r.raise_for_status()
+    d = r.json()
+    rl = d.get("rate_limit") or {}
+    prim, sec = rl.get("primary_window") or {}, rl.get("secondary_window") or {}
+
+    def pct(x):
+        return round(x["used_percent"]) if x.get("used_percent") is not None else None
+
+    def reset(x):
+        return _reset_fmt(seconds=x.get("reset_after_seconds"), at=x.get("reset_at"))
+
+    return {
+        "session_pct": pct(prim), "session_reset": reset(prim),
+        "week_pct": pct(sec), "week_reset": reset(sec),
+        "plan": d.get("plan_type"),
+        "updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# --- opencode Go usage: scrape the dashboard HTML (no API exists) -----------
+def _oc_window(name, text):
+    """Pull (usagePercent, resetInSec) out of a named dashboard usage object."""
+    m = re.search(name + r'["\']?\s*:\s*(?:\$R\[\d+\]\s*=\s*)?\{([^{}]*)\}', text, re.S)
+    if not m:
+        return None, None
+    body = m.group(1)
+
+    def num(field):
+        mm = re.search(field + r'["\']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?', body)
+        return float(mm.group(1)) if mm else None
+
+    return num("usagePercent"), num("resetInSec")
+
+
+def fetch_opencode_once():
+    url = OPENCODE_GO_URL.format(ws=OPENCODE_WORKSPACE_ID)
+    cookie = OPENCODE_AUTH_COOKIE if "auth=" in OPENCODE_AUTH_COOKIE else f"auth={OPENCODE_AUTH_COOKIE}"
+    r = requests.get(
+        url,
+        headers={"Cookie": cookie, "User-Agent": OPENCODE_USER_AGENT,
+                 "Accept": "text/html,application/xhtml+xml"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    text = html.unescape(r.text).replace('\\"', '"').replace("\\u0022", '"')
+    rec: dict = {"updated": datetime.now(timezone.utc).isoformat()}
+    found = False
+    for field, key in (("rollingUsage", "fivehr"), ("weeklyUsage", "week"), ("monthlyUsage", "month")):
+        up, rs = _oc_window(field, text)
+        if up is None:
+            continue
+        found = True
+        rec[f"{key}_pct"] = round(up)
+        rec[f"{key}_reset"] = _reset_fmt(seconds=rs) if rs else ""
+    if not found:
+        raise RuntimeError("no usage windows found (cookie expired or dashboard markup changed)")
+    return rec
+
+
 # --- drawing primitives ----------------------------------------------------
 def draw_weather_icon(dr, cx, cy, r, cond):
     """Filled grayscale weather glyph centred at (cx, cy), scale r, by condition."""
@@ -392,6 +588,32 @@ def _trunc(d, s, font, avail):
     while s and d.textlength(s + "…", font=font) > avail:
         s = s[:-1]
     return s + "…"
+
+
+def _usage_block(d, box, title, rows, stale):
+    """Draw a titled column of labeled % bars. rows = [(label, pct, reset)]."""
+    x, y, w, h = box
+    d.text((x, y), title + ("  (stale)" if stale else ""), font=_font(True, h * 0.12), fill=0)
+    yy = y + h * 0.2
+    if not rows:
+        d.text((x, yy), "usage n/a", font=_font(False, h * 0.11), fill=0)
+        return
+    lf, sf = _font(False, h * 0.09), _font(False, h * 0.075)
+    # Uniform pitch across columns (not h/len(rows)) so a 2-row provider's bars
+    # line up with a 3-row one's instead of stretching to fill the column.
+    rh = (h - (yy - y)) / USAGE_ROWS
+    bh = min(rh * 0.34, h * 0.1)
+    bx0, bx1 = x + w * 0.33, x + w * 0.97
+    for i, (label, pct, reset) in enumerate(rows):
+        ry = yy + i * rh
+        d.text((x, ry), label, font=lf, fill=0)
+        d.rectangle((bx0, ry, bx1, ry + bh), outline=0, width=3)
+        if pct is not None:
+            d.rectangle((bx0, ry, bx0 + (bx1 - bx0) * max(0, min(1, pct / 100)), ry + bh), fill=0)
+        line = f"{pct}%" if pct is not None else "—"
+        if reset:
+            line += f"  ·  {reset}"
+        d.text((bx0, ry + bh + h * 0.01), _trunc(d, line, sf, bx1 - bx0), font=sf, fill=0)
 
 
 # --- widgets: each draws inside box = (x, y, w, h) -------------------------
@@ -477,36 +699,39 @@ def w_sunmoon(d, box):
     d.text((mcx + mr + 12, mcy - h * 0.12), name, font=f, fill=0)
 
 
+def _rows(usage, keys):
+    """Build _usage_block rows [(label, pct, reset)] from a cached usage dict."""
+    return [(label, usage.get(f"{k}_pct"), usage.get(f"{k}_reset", "")) for label, k in keys]
+
+
 def w_usage(d, box):
-    x, y, w, h = box
     usage, stale = read_usage()
-    d.text((x, y), "Claude usage" + ("  (stale)" if stale else ""), font=_font(True, h * 0.11), fill=0)
-    yy = y + h * 0.16
-    rows = [("Session", "session"), ("Week", "week"), ("Sonnet", "sonnet")]
-    if not usage:
-        d.text((x, yy), "usage n/a", font=_font(False, h * 0.11), fill=0)
-        return
-    f = _font(False, h * 0.1)
-    bh = h * 0.1
-    bx0, bx1 = x + w * 0.13, x + w * 0.48
-    rh = (h - (yy - y)) / len(rows)
-    for i, (name, key) in enumerate(rows):
-        ry = yy + i * rh
-        pct = usage.get(f"{key}_pct")
-        d.text((x, ry), name, font=f, fill=0)
-        d.rectangle((bx0, ry, bx1, ry + bh), outline=0, width=3)
-        if pct is not None:
-            d.rectangle((bx0, ry, bx0 + (bx1 - bx0) * max(0, min(1, pct / 100)), ry + bh), fill=0)
-        txt = f"{pct}%" if pct is not None else "—"
-        if usage.get(f"{key}_reset"):
-            txt += f"  ·  resets {usage[f'{key}_reset']}"
-        d.text((bx1 + 16, ry), txt, font=f, fill=0)
+    keys = [("Session", "session"), ("Week", "week"), ("Sonnet", "sonnet")]
+    _usage_block(d, box, "Claude", _rows(usage, keys) if usage else [], stale)
+
+
+def w_codex(d, box):
+    usage, stale = read_usage(CODEX_USAGE_FILE)
+    keys = [("Session", "session"), ("Week", "week")]
+    _usage_block(d, box, "Codex", _rows(usage, keys) if usage else [], stale)
+
+
+def w_opencode(d, box):
+    usage, stale = read_usage(OPENCODE_USAGE_FILE)
+    keys = [("5h", "fivehr"), ("Week", "week"), ("Month", "month")]
+    _usage_block(d, box, "opencode", _rows(usage, keys) if usage else [], stale)
 
 
 WIDGET_FNS = {
     "clock": w_clock, "weather": w_weather, "agenda": w_agenda,
-    "forecast": w_forecast, "sunmoon": w_sunmoon, "usage": w_usage,
+    "forecast": w_forecast, "sunmoon": w_sunmoon,
+    "usage": w_usage, "codex": w_codex, "opencode": w_opencode,
 }
+# Providers that share the bottom usage strip (split into columns, in order).
+USAGE_NAMES = ("usage", "codex", "opencode")
+# Row slots reserved per usage column = the most any provider shows (Claude /
+# opencode = 3). Fixing this gives every column the same row pitch so bars align.
+USAGE_ROWS = 3
 
 
 def render(rotate=None):
@@ -533,8 +758,18 @@ def render(rotate=None):
         "agenda": (pad, mid_y, mid - 2 * pad, midrow),
         "forecast": (mid, mid_y, rcol, midrow * 0.45),
         "sunmoon": (mid, mid_y + midrow * 0.5, rcol, midrow * 0.5),
-        "usage": (pad, mid_b + 2 * pad, W - 2 * pad, H - (mid_b + 2 * pad) - pad),
     }
+    # The bottom strip is the usage zone: split it into equal columns, one per
+    # enabled usage provider (Claude / Codex / opencode), in DASH_WIDGETS order.
+    strip_y = mid_b + 2 * pad
+    usage_on = [n for n in DASH_WIDGETS if n in USAGE_NAMES]
+    if usage_on:
+        # Equal columns with even gutters, spanning pad‥W-pad exactly. Width is
+        # proportional to the provider count (1 provider = full width, etc.).
+        n = len(usage_on)
+        cw = (W - 2 * pad - pad * (n - 1)) / n
+        for i, name in enumerate(usage_on):
+            boxes[name] = (pad + i * (cw + pad), strip_y, cw, H - strip_y - pad)
     d.line((pad, H * 0.235, W - pad, H * 0.235), fill=0, width=2)
     d.line((pad, mid_b + pad, W - pad, mid_b + pad), fill=0, width=2)
     for name in DASH_WIDGETS:
@@ -595,4 +830,16 @@ if __name__ == "__main__":
         threading.Thread(target=ha_poll_loop, daemon=True).start()
     if CLAUDE_REFRESH_TOKEN or os.path.exists(TOKEN_FILE):
         threading.Thread(target=usage_poll_loop, daemon=True).start()
+    if CODEX_REFRESH_TOKEN or os.path.exists(CODEX_TOKEN_FILE):
+        threading.Thread(
+            target=_usage_poll,
+            args=(fetch_codex_usage_once, CODEX_USAGE_FILE, "codex", CODEX_POLL_MIN),
+            daemon=True,
+        ).start()
+    if OPENCODE_WORKSPACE_ID and OPENCODE_AUTH_COOKIE:
+        threading.Thread(
+            target=_usage_poll,
+            args=(fetch_opencode_once, OPENCODE_USAGE_FILE, "opencode", OPENCODE_POLL_MIN),
+            daemon=True,
+        ).start()
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
