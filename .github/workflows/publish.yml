@@ -1,0 +1,63 @@
+name: publish
+
+# Build the renderer image and publish it to GHCR on a version tag.
+# Tag a release with `git tag v0.1.0 && git push --tags` to fire this.
+# amd64-only: the renderer runs server-side on an amd64 host; the Kindle only
+# displays the resulting PNG, so no arm/multi-arch manifest is needed.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/erikbpf/kindle-dash
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build + push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./renderer
+          file: ./renderer/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Record digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Published"
+            echo '```'
+            echo "ghcr.io/erikbpf/kindle-dash@${DIGEST}"
+            echo '```'
+            echo "Mirror to Harbor + pin the consumer with this digest."
+          } >> "$GITHUB_STEP_SUMMARY"
