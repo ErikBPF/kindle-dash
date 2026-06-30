@@ -50,6 +50,16 @@ The renderer is **slot-based**: `render()` lays out boxes and hands each to a wi
 
 ## Quick start
 
+Use the published image (built by CI, amd64):
+
+```bash
+cp .env.example .env && $EDITOR .env                        # set resolution + sources
+docker run -d --name kindle-dash -p 8810:8080 --env-file .env \
+  -v kindle_dash_data:/data ghcr.io/erikbpf/kindle-dash:0.1.0   # serves :8810/dash.png
+```
+
+Or build from source:
+
 ```bash
 git clone https://github.com/ErikBPF/kindle-dash && cd kindle-dash
 cp .env.example renderer/.env && $EDITOR renderer/.env      # set resolution + sources
