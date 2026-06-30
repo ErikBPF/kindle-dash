@@ -1,9 +1,5 @@
 # kindle-dash
 
-> **SSOT role (desktop-nixos RFC 2026-06-29):** owns the **e-ink dashboard image +
-> device scripts** (standalone OSS — publishes GHCR + Harbor, D8). Consumed by
-> servarr via the pinned image.
-
 Turn a dead/old jailbroken Kindle into a calm, glare-free **e-ink wall dashboard** — clock, weather, a 3-day forecast, today's agenda, sun & moon, and your live **AI subscription usage** (Claude · Codex · opencode) — rendered server-side and painted by the device on a timer.
 
 > *Your Kindle didn't die. It ascended into furniture.*

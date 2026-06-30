@@ -13,6 +13,7 @@ devenv.local.nix
 __pycache__/
 *.pyc
 .venv/
+.ruff_cache/
 
 # render artifacts
 preview.png
