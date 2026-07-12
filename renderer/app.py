@@ -331,7 +331,8 @@ def fetch_usage_once():
         r = get(_refresh_access(_load_tokens())["access_token"])
     r.raise_for_status()
     d = r.json()
-    s, w, sn = d.get("five_hour") or {}, d.get("seven_day") or {}, d.get("seven_day_sonnet") or {}
+    s, w = d.get("five_hour") or {}, d.get("seven_day") or {}
+    extra = d.get("extra_usage") or {}
 
     def pct(x):
         return round(x["utilization"]) if x.get("utilization") is not None else None
@@ -339,7 +340,11 @@ def fetch_usage_once():
     return {
         "session_pct": pct(s), "session_reset": fmt(s.get("resets_at")),
         "week_pct": pct(w), "week_reset": fmt(w.get("resets_at")),
-        "sonnet_pct": pct(sn), "sonnet_reset": fmt(sn.get("resets_at")),
+        "extra_enabled": bool(extra.get("is_enabled")),
+        "extra_pct": pct(extra),
+        "extra_used": extra.get("used_credits"),
+        "extra_limit": extra.get("monthly_limit"),
+        "extra_currency": extra.get("currency") or "USD",
         "updated": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -474,9 +479,18 @@ def fetch_codex_usage_once():
     def reset(x):
         return _reset_fmt(seconds=x.get("reset_after_seconds"), at=x.get("reset_at"))
 
+    credits = d.get("credits") or {}
+    windows = []
+    for window in (prim, sec):
+        seconds = window.get("limit_window_seconds")
+        label = "5h" if seconds == 18_000 else "7d" if seconds == 604_800 else None
+        if label and pct(window) is not None:
+            windows.append({"label": label, "pct": pct(window), "reset": reset(window)})
+
     return {
-        "session_pct": pct(prim), "session_reset": reset(prim),
-        "week_pct": pct(sec), "week_reset": reset(sec),
+        "windows": windows,
+        "credit_balance": credits.get("balance") if credits.get("has_credits") else None,
+        "credit_unlimited": bool(credits.get("unlimited")),
         "plan": d.get("plan_type"),
         "updated": datetime.now(timezone.utc).isoformat(),
     }
@@ -610,9 +624,11 @@ def _usage_block(d, box, title, rows, stale):
         d.rectangle((bx0, ry, bx1, ry + bh), outline=0, width=3)
         if pct is not None:
             d.rectangle((bx0, ry, bx0 + (bx1 - bx0) * max(0, min(1, pct / 100)), ry + bh), fill=0)
-        line = f"{pct}%" if pct is not None else "—"
+        line = f"{pct}%" if pct is not None else ""
         if reset:
-            line += f"  ·  {reset}"
+            line += ("  ·  " if line else "") + reset
+        if not line:
+            line = "—"
         d.text((bx0, ry + bh + h * 0.01), _trunc(d, line, sf, bx1 - bx0), font=sf, fill=0)
 
 
@@ -704,16 +720,39 @@ def _rows(usage, keys):
     return [(label, usage.get(f"{k}_pct"), usage.get(f"{k}_reset", "")) for label, k in keys]
 
 
+def _money(minor_units, currency):
+    """Format provider credit fields, which are denominated in minor units."""
+    try:
+        amount = float(minor_units) / 100
+    except (TypeError, ValueError):
+        return ""
+    prefix = "$" if currency == "USD" else f"{currency} "
+    return f"{prefix}{amount:,.2f}"
+
+
 def w_usage(d, box):
     usage, stale = read_usage()
-    keys = [("Session", "session"), ("Week", "week"), ("Sonnet", "sonnet")]
-    _usage_block(d, box, "Claude", _rows(usage, keys) if usage else [], stale)
+    rows = _rows(usage, [("5h", "session"), ("7d", "week")]) if usage else []
+    if usage and usage.get("extra_enabled"):
+        used, limit = usage.get("extra_used"), usage.get("extra_limit")
+        currency = usage.get("extra_currency", "USD")
+        used_text, limit_text = _money(used, currency), _money(limit, currency)
+        detail = f"{used_text} / {limit_text}" if used_text and limit_text else ""
+        rows.append(("Extra", usage.get("extra_pct"), detail))
+    _usage_block(d, box, "Claude", rows, stale)
 
 
 def w_codex(d, box):
     usage, stale = read_usage(CODEX_USAGE_FILE)
-    keys = [("Session", "session"), ("Week", "week")]
-    _usage_block(d, box, "Codex", _rows(usage, keys) if usage else [], stale)
+    rows = [
+        (window["label"], window.get("pct"), window.get("reset", ""))
+        for window in (usage or {}).get("windows", [])
+    ]
+    if usage and usage.get("credit_unlimited"):
+        rows.append(("Credits", None, "unlimited"))
+    elif usage and usage.get("credit_balance") is not None:
+        rows.append(("Credits", None, f"{usage['credit_balance']} left"))
+    _usage_block(d, box, "Codex", rows, stale)
 
 
 def w_opencode(d, box):

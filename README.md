@@ -17,7 +17,7 @@ No glowing rectangle, no app, no cloud account. A tiny container renders a grays
 - **Forecast** — next N days (hi/lo + icon).
 - **Agenda** — today's calendar events.
 - **Sun & moon** — sunrise/sunset + a computed moon-phase glyph.
-- **AI usage** — live subscription limits side by side: Claude (Session/Week/Sonnet), Codex (Session/Week), opencode Go (5h/Week/Month). Columns size themselves to however many you enable.
+- **AI usage** — live subscription limits side by side: Claude (5h/7d/Extra), Codex (available windows/Credits), opencode Go (5h/Week/Month). Columns size themselves to however many you enable.
 
 Every panel is optional. A panel with no data source configured just renders a quiet placeholder — never a broken image.
 

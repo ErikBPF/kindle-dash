@@ -32,7 +32,7 @@ Optional. Create a long-lived token: HA → Profile → Security → Long-lived 
 
 Forecast uses HA's `weather.get_forecasts` service; if your weather integration doesn't support daily forecasts, the strip just hides.
 
-## Claude usage (Session / Week / Sonnet)
+## Claude usage (5h / 7d / Extra)
 
 Optional. **Read [SECURITY.md](SECURITY.md) first** — it's an undocumented API and you should give the dashboard its own login.
 
@@ -45,9 +45,12 @@ Optional. **Read [SECURITY.md](SECURITY.md) first** — it's an undocumented API
 | `CLAUDE_USAGE_URL` | `https://api.anthropic.com/api/oauth/usage` | usage endpoint |
 | `CLAUDE_STALE_AFTER_MIN` | `45` | after this with no successful fetch, the panel shows `(stale)` |
 
-The renderer persists rotated tokens to `/data/claude_tokens.json` (mount the volume so they survive restarts). The `CLAUDE_REFRESH_TOKEN` env is only a **seed** used on first run.
+The renderer shows the five-hour and seven-day plan limits. Its third row shows
+monthly Extra Usage spend when enabled. The renderer persists rotated tokens to
+`/data/claude_tokens.json` (mount the volume so they survive restarts). The
+`CLAUDE_REFRESH_TOKEN` env is only a **seed** used on first run.
 
-## Codex usage (Session / Week)
+## Codex usage (5h / 7d / Credits)
 
 Optional. ChatGPT-subscription quota, via the same OAuth refresh pattern as Claude — give the dashboard its **own** `codex login` (token rotation would otherwise log your workstation out). Add `codex` to `DASH_WIDGETS`.
 
@@ -60,7 +63,12 @@ Optional. ChatGPT-subscription quota, via the same OAuth refresh pattern as Clau
 | `CODEX_TOKEN_URL` | `https://auth.openai.com/oauth/token` | token refresh endpoint |
 | `CODEX_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage` | usage endpoint |
 
-Reads `rate_limit.primary_window` (5h → Session) and `secondary_window` (weekly → Week). Rotated tokens persist to `/data/codex_tokens.json`; `CLAUDE_STALE_AFTER_MIN` also drives this panel's `(stale)` marker.
+Reads the included-usage windows plus the purchased credit balance returned by
+the usage endpoint. Window labels come from their durations, not their position:
+five hours is shown as `5h`, seven days as `7d`, and absent windows are hidden.
+Included usage is consumed first; credits cover eligible usage after a plan
+limit is reached. Rotated tokens persist to `/data/codex_tokens.json`;
+`CLAUDE_STALE_AFTER_MIN` also drives this panel's `(stale)` marker.
 
 ## opencode Go usage (5h / Week / Month)
 
