@@ -98,13 +98,14 @@ jobs:
             --certificate-oidc-issuer "$issuer" \
             "$ref"
           provenance=$(docker buildx imagetools inspect "$ref" \
-            --format '{{ json (index .Provenance "linux/amd64").SLSA }}')
+            --format '{{ json .Provenance.SLSA }}')
           sbom=$(docker buildx imagetools inspect "$ref" \
-            --format '{{ json (index .SBOM "linux/amd64").SPDX }}')
+            --format '{{ json .SBOM.SPDX }}')
           jq -e '
             type == "object" and
-            (.buildType | type == "string") and
-            (.materials | type == "array")
+            (.buildDefinition.buildType | type == "string") and
+            (.buildDefinition.resolvedDependencies | type == "array") and
+            (.runDetails.builder.id | type == "string")
           ' <<<"$provenance" >/dev/null
           jq -e '
             .SPDXID == "SPDXRef-DOCUMENT" and
