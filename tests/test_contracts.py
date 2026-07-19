@@ -117,6 +117,7 @@ class PublishWorkflowContract(unittest.TestCase):
             '.runDetails.builder.id | type == "string"'
         )
         sbom_shape = self.workflow.index('.SPDXID == "SPDXRef-DOCUMENT"')
+        tag_identity = self.workflow.index('git config user.name "github-actions[bot]"')
         tag = self.workflow.index('git tag --annotate "$VERSION"')
         self.assertLess(
             max(
@@ -128,6 +129,7 @@ class PublishWorkflowContract(unittest.TestCase):
                 dependencies_shape,
                 builder_shape,
                 sbom_shape,
+                tag_identity,
             ),
             tag,
         )
