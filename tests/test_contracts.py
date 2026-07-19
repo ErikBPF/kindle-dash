@@ -149,6 +149,18 @@ class PublishWorkflowContract(unittest.TestCase):
         )
         self.assertIn("https://token.actions.githubusercontent.com", self.workflow)
 
+    def test_servarr_checks_are_discovered_before_watch(self):
+        discover = self.workflow.index(
+            '--repo ErikBPF/servarr "$pr_number" --json name'
+        )
+        watch = self.workflow.index(
+            'gh pr checks --repo ErikBPF/servarr "$pr_number" \\\n'
+            "            --watch --interval 10"
+        )
+        self.assertIn("for attempt in {1..12}; do", self.workflow)
+        self.assertIn("No checks registered for Servarr PR", self.workflow)
+        self.assertLess(discover, watch)
+
 
 class ServarrPinContract(unittest.TestCase):
     def test_updates_exactly_one_immutable_pin(self):

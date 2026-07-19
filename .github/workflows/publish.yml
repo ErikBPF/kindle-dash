@@ -193,6 +193,19 @@ jobs:
             --title "chore(kindle): pin ${VERSION}" \
             --body "Verified release: \`ghcr.io/erikbpf/kindle-dash@${DIGEST}\`")
           pr_number="${pr_url##*/}"
+          for attempt in {1..12}; do
+            check_count=$(gh pr checks \
+              --repo ErikBPF/servarr "$pr_number" --json name \
+              --jq length 2>/dev/null || true)
+            if [[ "${check_count:-0}" -gt 0 ]]; then
+              break
+            fi
+            if [[ "$attempt" -eq 12 ]]; then
+              echo "::error::No checks registered for Servarr PR #${pr_number}"
+              exit 1
+            fi
+            sleep 5
+          done
           gh pr checks --repo ErikBPF/servarr "$pr_number" \
             --watch --interval 10
           gh pr merge --repo ErikBPF/servarr "$pr_number" \
