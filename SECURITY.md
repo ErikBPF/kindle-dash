@@ -52,6 +52,13 @@ Set `OPENCODE_WORKSPACE_ID` + `OPENCODE_AUTH_COOKIE` (both opt-in; blank = panel
 
 The renderer serves **plain HTTP** with **no authentication** — because the Kindle can't do TLS. Keep it on a trusted LAN. The reverse-proxy example restricts the vhost to private ranges (`allow`/`deny`); adjust to your network. Don't expose `/dash.png` to the internet — it may reveal your calendar, location (via weather), and usage.
 
+## Published image verification
+
+Releases are built from protected `main` merge commits. The workflow publishes
+an immutable GHCR digest with BuildKit SBOM and provenance, signs that digest
+keylessly, and verifies the exact repository/workflow identity before creating
+the Git tag. Consumers should pin the digest, not a mutable version tag.
+
 ## Reporting
 
 Found something? Open an issue (or a private report if it's sensitive). This is a hobby project with no warranty (see [LICENSE](LICENSE)); fixes are best-effort.
