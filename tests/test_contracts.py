@@ -51,6 +51,10 @@ class ParserContract(unittest.TestCase):
         )
         self.assertEqual(result["updated"], NOW.isoformat())
 
+    def test_opencode_markup_drift_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "no usage windows found"):
+            app.parse_opencode_usage("<html>changed dashboard</html>", now=NOW)
+
 
 class RenderContract(unittest.TestCase):
     def test_empty_fixture_render_is_deterministic_png(self):
