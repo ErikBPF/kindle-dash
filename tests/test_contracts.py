@@ -105,17 +105,26 @@ class PublishWorkflowContract(unittest.TestCase):
     def test_verified_artifacts_precede_git_tag(self):
         sign = self.workflow.index("cosign sign")
         signature = self.workflow.index("cosign verify")
-        provenance = self.workflow.index(
-            '--format \'{{ json (index .Provenance "linux/amd64").SLSA }}\''
+        provenance = self.workflow.index("--format '{{ json .Provenance.SLSA }}'")
+        sbom = self.workflow.index("--format '{{ json .SBOM.SPDX }}'")
+        provenance_shape = self.workflow.index(
+            '.buildDefinition.buildType | type == "string"'
         )
-        sbom = self.workflow.index(
-            '--format \'{{ json (index .SBOM "linux/amd64").SPDX }}\''
+        dependencies_shape = self.workflow.index(
+            ".buildDefinition.resolvedDependencies | type == \"array\""
         )
-        provenance_shape = self.workflow.index('.buildType | type == "string"')
         sbom_shape = self.workflow.index('.SPDXID == "SPDXRef-DOCUMENT"')
         tag = self.workflow.index('git tag --annotate "$VERSION"')
         self.assertLess(
-            max(sign, signature, sbom, provenance, provenance_shape, sbom_shape),
+            max(
+                sign,
+                signature,
+                sbom,
+                provenance,
+                provenance_shape,
+                dependencies_shape,
+                sbom_shape,
+            ),
             tag,
         )
 
