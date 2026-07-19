@@ -8,7 +8,7 @@ from pathlib import Path
 PIN = re.compile(
     r"(?m)^(?P<prefix>\s*image: "
     r"harbor\.homelab\.pastelariadev\.com/library/kindle-dash:)"
-    r"v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$"
+    r"v?\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$"
 )
 VERSION = re.compile(r"v\d+\.\d+\.\d+")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")

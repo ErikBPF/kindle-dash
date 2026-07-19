@@ -158,7 +158,7 @@ class ServarrPinContract(unittest.TestCase):
                 "services:\n"
                 "  kindle-dash:\n"
                 "    image: harbor.homelab.pastelariadev.com/library/"
-                f"kindle-dash:v0.1.1@sha256:{'1' * 64}\n"
+                f"kindle-dash:0.1.1@sha256:{'1' * 64}\n"
             )
             update_pin(path, "v0.3.0", f"sha256:{'2' * 64}")
             self.assertIn(
