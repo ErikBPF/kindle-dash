@@ -124,6 +124,80 @@ jobs:
           git tag --annotate "$VERSION" --message "Release $VERSION"
           git push origin "$VERSION"
 
+      - name: Mint narrow Servarr App token
+        id: servarr-app
+        if: steps.version.outputs.publish == 'true'
+        env:
+          APP_ID: ${{ secrets.KINDLE_RELEASE_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.KINDLE_RELEASE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          b64url() {
+            openssl base64 -A | tr '+/' '-_' | tr -d '='
+          }
+          now=$(date +%s)
+          header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
+          payload=$(jq -nc \
+            --argjson iat "$((now - 60))" \
+            --argjson exp "$((now + 540))" \
+            --arg iss "$APP_ID" \
+            '{iat:$iat,exp:$exp,iss:$iss}' | b64url)
+          unsigned="${header}.${payload}"
+          signature=$(printf '%s' "$unsigned" |
+            openssl dgst -sha256 -sign <(printf '%s' "$APP_PRIVATE_KEY") |
+            b64url)
+          app_jwt="${unsigned}.${signature}"
+          installation_id=$(curl -fsS \
+            -H "Authorization: Bearer ${app_jwt}" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/ErikBPF/servarr/installation |
+            jq -r .id)
+          token=$(curl -fsS -X POST \
+            -H "Authorization: Bearer ${app_jwt}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/app/installations/${installation_id}/access_tokens" |
+            jq -r .token)
+          test -n "$token"
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: steps.version.outputs.publish == 'true'
+        with:
+          repository: ErikBPF/servarr
+          token: ${{ steps.servarr-app.outputs.token }}
+          path: servarr
+
+      - name: Open and merge verified Servarr pin PR
+        if: steps.version.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          GH_TOKEN: ${{ steps.servarr-app.outputs.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          file=servarr/machines/discovery/kindle-dash.compose.yml
+          python tools/update_servarr_pin.py "$file" "$VERSION" "$DIGEST"
+          branch="release/kindle-dash-${VERSION}"
+          git -C servarr config user.name "erikbpf-kindle-release[bot]"
+          git -C servarr config user.email \
+            "4341347+erikbpf-kindle-release[bot]@users.noreply.github.com"
+          git -C servarr switch -c "$branch"
+          git -C servarr add machines/discovery/kindle-dash.compose.yml
+          git -C servarr commit -m "chore(kindle): pin ${VERSION}"
+          git -C servarr push origin "$branch"
+          pr_url=$(gh pr create \
+            --repo ErikBPF/servarr \
+            --base main \
+            --head "$branch" \
+            --title "chore(kindle): pin ${VERSION}" \
+            --body "Verified release: \`ghcr.io/erikbpf/kindle-dash@${DIGEST}\`")
+          pr_number="${pr_url##*/}"
+          gh pr checks --repo ErikBPF/servarr "$pr_number" \
+            --watch --interval 10
+          gh pr merge --repo ErikBPF/servarr "$pr_number" \
+            --squash --delete-branch
+
       - name: Release summary
         if: steps.version.outputs.publish == 'true'
         env:

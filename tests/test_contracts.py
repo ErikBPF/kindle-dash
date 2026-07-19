@@ -1,6 +1,7 @@
 import hashlib
 import json
 import pathlib
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from io import BytesIO
@@ -8,6 +9,7 @@ from io import BytesIO
 from PIL import Image
 from renderer import app
 from tools.release_version import next_version, release_kind
+from tools.update_servarr_pin import update_pin
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -146,6 +148,30 @@ class PublishWorkflowContract(unittest.TestCase):
             self.workflow,
         )
         self.assertIn("https://token.actions.githubusercontent.com", self.workflow)
+
+
+class ServarrPinContract(unittest.TestCase):
+    def test_updates_exactly_one_immutable_pin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "kindle-dash.compose.yml"
+            path.write_text(
+                "services:\n"
+                "  kindle-dash:\n"
+                "    image: harbor.homelab.pastelariadev.com/library/"
+                f"kindle-dash:v0.1.1@sha256:{'1' * 64}\n"
+            )
+            update_pin(path, "v0.3.0", f"sha256:{'2' * 64}")
+            self.assertIn(
+                f"kindle-dash:v0.3.0@sha256:{'2' * 64}",
+                path.read_text(),
+            )
+
+    def test_rejects_missing_pin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "kindle-dash.compose.yml"
+            path.write_text("services: {}\n")
+            with self.assertRaisesRegex(ValueError, "found 0"):
+                update_pin(path, "v0.3.0", f"sha256:{'2' * 64}")
 
 
 if __name__ == "__main__":
