@@ -119,6 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.merge_commit_sha }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag --annotate "$VERSION" --message "Release $VERSION"
           git push origin "$VERSION"
 
