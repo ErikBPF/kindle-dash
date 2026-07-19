@@ -1,67 +1,133 @@
 name: publish
 
-# Build the renderer image and publish it to GHCR on a version tag.
-# Tag a release with `git tag v0.1.0 && git push --tags` to fire this.
-# amd64-only: the renderer runs server-side on an amd64 host; the Kindle only
-# displays the resulting PNG, so no arm/multi-arch manifest is needed.
-
+# Publish only a PR merge commit from protected main. Release labels are
+# mutually exclusive in tools/release_version.py; no label defaults to minor.
 on:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    branches: [main]
+    types: [closed]
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
   packages: write
 
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish-main
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Calculate release
+        id: version
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import subprocess
+
+          from tools.release_version import next_version
+
+          tags = subprocess.run(
+              ["git", "tag", "--list", "v*"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout.splitlines()
+          version = next_version(tags, json.loads(os.environ["LABELS"]))
+          print(f"publish={'true' if version else 'false'}")
+          print(f"version={version or ''}")
+          PY
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        if: steps.version.outputs.publish == 'true'
 
       - name: Log in to GHCR
+        if: steps.version.outputs.publish == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags + labels
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ghcr.io/erikbpf/kindle-dash
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      - name: Build + push
+      - name: Build and publish immutable image
         id: build
+        if: steps.version.outputs.publish == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./renderer
           file: ./renderer/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/erikbpf/kindle-dash:${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.event.pull_request.merge_commit_sha }}
+            org.opencontainers.image.source=https://github.com/ErikBPF/kindle-dash
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          provenance: mode=max
+          sbom: true
 
-      - name: Record digest
+      - name: Install Cosign
+        if: steps.version.outputs.publish == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign and verify image artifacts
+        if: steps.version.outputs.publish == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/erikbpf/kindle-dash
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}@${DIGEST}"
+          identity='https://github.com/ErikBPF/kindle-dash/.github/workflows/publish.yml@refs/heads/main'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign sign --yes "$ref"
+          cosign verify \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "$ref"
+          cosign verify-attestation \
+            --type spdxjson \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "$ref"
+          cosign verify-attestation \
+            --type slsaprovenance \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "$ref"
+
+      - name: Tag verified merge commit
+        if: steps.version.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.merge_commit_sha }}"
+          git tag --annotate "$VERSION" --message "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Release summary
+        if: steps.version.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           {
-            echo "### Published"
-            echo '```'
-            echo "ghcr.io/erikbpf/kindle-dash@${DIGEST}"
-            echo '```'
-            echo "Mirror to Harbor + pin the consumer with this digest."
+            echo "### Published and verified"
+            echo
+            echo "\`ghcr.io/erikbpf/kindle-dash@${DIGEST}\`"
+            echo
+            echo "Version: \`${VERSION}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -306,7 +306,10 @@ def _access_token():
     return tok["access_token"]
 
 
-def fetch_usage_once():
+def parse_claude_usage(data, now=None):
+    """Normalize one Claude usage payload without network or credential access."""
+    now = now or datetime.now(timezone.utc)
+
     def fmt(iso):
         if not iso:
             return ""
@@ -315,6 +318,25 @@ def fetch_usage_once():
         except Exception:
             return ""
 
+    s, w = data.get("five_hour") or {}, data.get("seven_day") or {}
+    extra = data.get("extra_usage") or {}
+
+    def pct(value):
+        return round(value["utilization"]) if value.get("utilization") is not None else None
+
+    return {
+        "session_pct": pct(s), "session_reset": fmt(s.get("resets_at")),
+        "week_pct": pct(w), "week_reset": fmt(w.get("resets_at")),
+        "extra_enabled": bool(extra.get("is_enabled")),
+        "extra_pct": pct(extra),
+        "extra_used": extra.get("used_credits"),
+        "extra_limit": extra.get("monthly_limit"),
+        "extra_currency": extra.get("currency") or "USD",
+        "updated": now.isoformat(),
+    }
+
+
+def fetch_usage_once():
     def get(token):
         return requests.get(
             CLAUDE_USAGE_URL,
@@ -330,23 +352,7 @@ def fetch_usage_once():
     if r.status_code == 401:
         r = get(_refresh_access(_load_tokens())["access_token"])
     r.raise_for_status()
-    d = r.json()
-    s, w = d.get("five_hour") or {}, d.get("seven_day") or {}
-    extra = d.get("extra_usage") or {}
-
-    def pct(x):
-        return round(x["utilization"]) if x.get("utilization") is not None else None
-
-    return {
-        "session_pct": pct(s), "session_reset": fmt(s.get("resets_at")),
-        "week_pct": pct(w), "week_reset": fmt(w.get("resets_at")),
-        "extra_enabled": bool(extra.get("is_enabled")),
-        "extra_pct": pct(extra),
-        "extra_used": extra.get("used_credits"),
-        "extra_limit": extra.get("monthly_limit"),
-        "extra_currency": extra.get("currency") or "USD",
-        "updated": datetime.now(timezone.utc).isoformat(),
-    }
+    return parse_claude_usage(r.json())
 
 
 def usage_poll_loop():
@@ -376,11 +382,11 @@ def _usage_poll(fetch_once, path, label, interval_min):
         time.sleep(interval_min * 60)
 
 
-def _reset_fmt(seconds=None, at=None):
+def _reset_fmt(seconds=None, at=None, now=None):
     """Format a reset time (relative seconds, or absolute epoch) as local text."""
     try:
         if seconds is not None:
-            dt = datetime.now(timezone.utc) + timedelta(seconds=int(seconds))
+            dt = (now or datetime.now(timezone.utc)) + timedelta(seconds=int(seconds))
         elif at is not None:
             v = float(at)
             if v > 2_000_000_000_000:  # milliseconds, not seconds
@@ -457,6 +463,37 @@ def _codex_token():
     return tok
 
 
+def parse_codex_usage(data, now=None):
+    """Normalize one Codex usage payload without network or credential access."""
+    now = now or datetime.now(timezone.utc)
+    rl = data.get("rate_limit") or {}
+    prim, sec = rl.get("primary_window") or {}, rl.get("secondary_window") or {}
+
+    def pct(x):
+        return round(x["used_percent"]) if x.get("used_percent") is not None else None
+
+    def reset(x):
+        return _reset_fmt(
+            seconds=x.get("reset_after_seconds"), at=x.get("reset_at"), now=now
+        )
+
+    credits = data.get("credits") or {}
+    windows = []
+    for window in (prim, sec):
+        seconds = window.get("limit_window_seconds")
+        label = "5h" if seconds == 18_000 else "7d" if seconds == 604_800 else None
+        if label and pct(window) is not None:
+            windows.append({"label": label, "pct": pct(window), "reset": reset(window)})
+
+    return {
+        "windows": windows,
+        "credit_balance": credits.get("balance") if credits.get("has_credits") else None,
+        "credit_unlimited": bool(credits.get("unlimited")),
+        "plan": data.get("plan_type"),
+        "updated": now.isoformat(),
+    }
+
+
 def fetch_codex_usage_once():
     def get(tok):
         hdrs = {"Authorization": f"Bearer {tok['access_token']}", "User-Agent": CODEX_USER_AGENT}
@@ -469,31 +506,7 @@ def fetch_codex_usage_once():
     if r.status_code == 401:
         r = get(_codex_refresh(_codex_load_tokens()))
     r.raise_for_status()
-    d = r.json()
-    rl = d.get("rate_limit") or {}
-    prim, sec = rl.get("primary_window") or {}, rl.get("secondary_window") or {}
-
-    def pct(x):
-        return round(x["used_percent"]) if x.get("used_percent") is not None else None
-
-    def reset(x):
-        return _reset_fmt(seconds=x.get("reset_after_seconds"), at=x.get("reset_at"))
-
-    credits = d.get("credits") or {}
-    windows = []
-    for window in (prim, sec):
-        seconds = window.get("limit_window_seconds")
-        label = "5h" if seconds == 18_000 else "7d" if seconds == 604_800 else None
-        if label and pct(window) is not None:
-            windows.append({"label": label, "pct": pct(window), "reset": reset(window)})
-
-    return {
-        "windows": windows,
-        "credit_balance": credits.get("balance") if credits.get("has_credits") else None,
-        "credit_unlimited": bool(credits.get("unlimited")),
-        "plan": d.get("plan_type"),
-        "updated": datetime.now(timezone.utc).isoformat(),
-    }
+    return parse_codex_usage(r.json())
 
 
 # --- opencode Go usage: scrape the dashboard HTML (no API exists) -----------
@@ -511,6 +524,24 @@ def _oc_window(name, text):
     return num("usagePercent"), num("resetInSec")
 
 
+def parse_opencode_usage(text, now=None):
+    """Normalize one OpenCode dashboard response without network or cookies."""
+    text = html.unescape(text).replace('\\"', '"').replace("\\u0022", '"')
+    now = now or datetime.now(timezone.utc)
+    rec: dict = {"updated": now.isoformat()}
+    found = False
+    for field, key in (("rollingUsage", "fivehr"), ("weeklyUsage", "week"), ("monthlyUsage", "month")):
+        up, rs = _oc_window(field, text)
+        if up is None:
+            continue
+        found = True
+        rec[f"{key}_pct"] = round(up)
+        rec[f"{key}_reset"] = _reset_fmt(seconds=rs, now=now) if rs else ""
+    if not found:
+        raise RuntimeError("no usage windows found (cookie expired or dashboard markup changed)")
+    return rec
+
+
 def fetch_opencode_once():
     url = OPENCODE_GO_URL.format(ws=OPENCODE_WORKSPACE_ID)
     cookie = OPENCODE_AUTH_COOKIE if "auth=" in OPENCODE_AUTH_COOKIE else f"auth={OPENCODE_AUTH_COOKIE}"
@@ -521,19 +552,7 @@ def fetch_opencode_once():
         timeout=15,
     )
     r.raise_for_status()
-    text = html.unescape(r.text).replace('\\"', '"').replace("\\u0022", '"')
-    rec: dict = {"updated": datetime.now(timezone.utc).isoformat()}
-    found = False
-    for field, key in (("rollingUsage", "fivehr"), ("weeklyUsage", "week"), ("monthlyUsage", "month")):
-        up, rs = _oc_window(field, text)
-        if up is None:
-            continue
-        found = True
-        rec[f"{key}_pct"] = round(up)
-        rec[f"{key}_reset"] = _reset_fmt(seconds=rs) if rs else ""
-    if not found:
-        raise RuntimeError("no usage windows found (cookie expired or dashboard markup changed)")
-    return rec
+    return parse_opencode_usage(r.text)
 
 
 # --- drawing primitives ----------------------------------------------------
