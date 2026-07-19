@@ -113,6 +113,9 @@ class PublishWorkflowContract(unittest.TestCase):
         dependencies_shape = self.workflow.index(
             ".buildDefinition.resolvedDependencies | type == \"array\""
         )
+        builder_shape = self.workflow.index(
+            '.runDetails.builder.id | type == "string"'
+        )
         sbom_shape = self.workflow.index('.SPDXID == "SPDXRef-DOCUMENT"')
         tag = self.workflow.index('git tag --annotate "$VERSION"')
         self.assertLess(
@@ -123,6 +126,7 @@ class PublishWorkflowContract(unittest.TestCase):
                 provenance,
                 provenance_shape,
                 dependencies_shape,
+                builder_shape,
                 sbom_shape,
             ),
             tag,
