@@ -101,10 +101,15 @@ class PublishWorkflowContract(unittest.TestCase):
     def test_verified_artifacts_precede_git_tag(self):
         sign = self.workflow.index("cosign sign")
         signature = self.workflow.index("cosign verify")
-        sbom = self.workflow.index("--type spdxjson")
-        provenance = self.workflow.index("--type slsaprovenance")
+        provenance = self.workflow.index("--format '{{ json .Provenance }}'")
+        sbom = self.workflow.index("--format '{{ json .SBOM }}'")
+        provenance_shape = self.workflow.index('.buildType | type == "string"')
+        sbom_shape = self.workflow.index('.SPDXID == "SPDXRef-DOCUMENT"')
         tag = self.workflow.index('git tag --annotate "$VERSION"')
-        self.assertLess(max(sign, signature, sbom, provenance), tag)
+        self.assertLess(
+            max(sign, signature, sbom, provenance, provenance_shape, sbom_shape),
+            tag,
+        )
 
     def test_keyless_identity_is_narrow(self):
         self.assertIn("id-token: write", self.workflow)
