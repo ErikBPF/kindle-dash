@@ -87,5 +87,34 @@ class ReleaseVersionContract(unittest.TestCase):
             release_kind(["release:patch", "release:major"])
 
 
+class PublishWorkflowContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (ROOT / ".github/workflows/publish.yml").read_text()
+
+    def test_release_is_merge_driven_not_tag_driven(self):
+        self.assertIn("pull_request:", self.workflow)
+        self.assertIn("types: [closed]", self.workflow)
+        self.assertIn("github.event.pull_request.merged == true", self.workflow)
+        self.assertNotIn('tags:\n      - "v*"', self.workflow)
+
+    def test_verified_artifacts_precede_git_tag(self):
+        sign = self.workflow.index("cosign sign")
+        signature = self.workflow.index("cosign verify")
+        sbom = self.workflow.index("--type spdxjson")
+        provenance = self.workflow.index("--type slsaprovenance")
+        tag = self.workflow.index('git tag --annotate "$VERSION"')
+        self.assertLess(max(sign, signature, sbom, provenance), tag)
+
+    def test_keyless_identity_is_narrow(self):
+        self.assertIn("id-token: write", self.workflow)
+        self.assertIn(
+            "https://github.com/ErikBPF/kindle-dash/"
+            ".github/workflows/publish.yml@refs/heads/main",
+            self.workflow,
+        )
+        self.assertIn("https://token.actions.githubusercontent.com", self.workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
