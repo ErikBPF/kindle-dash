@@ -97,16 +97,16 @@ jobs:
             --certificate-identity "$identity" \
             --certificate-oidc-issuer "$issuer" \
             "$ref"
-          provenance=$(docker buildx imagetools inspect "$ref" --format '{{ json .Provenance }}')
-          sbom=$(docker buildx imagetools inspect "$ref" --format '{{ json .SBOM }}')
+          provenance=$(docker buildx imagetools inspect "$ref" \
+            --format '{{ json (index .Provenance "linux/amd64").SLSA }}')
+          sbom=$(docker buildx imagetools inspect "$ref" \
+            --format '{{ json (index .SBOM "linux/amd64").SPDX }}')
           jq -e '
-            .SLSA |
             type == "object" and
             (.buildType | type == "string") and
             (.materials | type == "array")
           ' <<<"$provenance" >/dev/null
           jq -e '
-            .SPDX |
             .SPDXID == "SPDXRef-DOCUMENT" and
             (.packages | type == "array")
           ' <<<"$sbom" >/dev/null
