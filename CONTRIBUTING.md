@@ -30,6 +30,21 @@ Iterate on layout/widgets with `preview` — no container, no Kindle needed. Set
 - **Commits**: Conventional Commits (`feat`, `fix`, `docs`, …). No AI co-author trailers.
 - **Secrets**: never commit `.env` or tokens.
 
+## Release labels
+
+Every merged PR is evaluated for a release from the protected merge commit.
+Use at most one release label:
+
+- `release:major`, `release:minor`, or `release:patch` selects that SemVer bump.
+- `release:none` skips publication.
+- No release label defaults to a minor bump.
+- Conflicting release labels fail closed without publishing.
+
+CI must pass before merge. The release workflow publishes the amd64 image by
+digest, verifies its keyless signature, SBOM, and provenance, then creates the
+Git tag. A tag is therefore evidence of a verified artifact, not the trigger
+for building one.
+
 ## Scope
 
 Core stays small and dependency-light (Pillow + requests). New data sources belong in widgets, not the core. Big layout ideas (portrait mode, multi-screen rotation) are welcome — open an issue first so we agree on the shape.
