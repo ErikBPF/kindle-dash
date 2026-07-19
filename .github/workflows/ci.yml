@@ -30,10 +30,13 @@ jobs:
         run: python -m pip install -r renderer/requirements.txt ruff==0.12.3
 
       - name: Lint
-        run: ruff check renderer/app.py tools/opencode-capture.py
+        run: ruff check renderer/app.py tools tests
+
+      - name: Contract tests
+        run: python -m unittest discover -s tests -v
 
       - name: Compile
-        run: python -m compileall -q renderer tools
+        run: python -m compileall -q renderer tools tests
 
       - name: Build container
         run: docker build --tag kindle-dash:test renderer
