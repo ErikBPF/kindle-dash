@@ -40,4 +40,4 @@ jobs:
             echo '```json'
             jq "$shape" <<<"$sbom"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
