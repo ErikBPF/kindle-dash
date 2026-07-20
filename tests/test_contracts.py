@@ -5,8 +5,9 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from io import BytesIO
+from unittest import mock
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from renderer import app
 from tools.release_version import next_version, release_kind
 from tools.update_servarr_pin import update_pin
@@ -59,6 +60,19 @@ class ParserContract(unittest.TestCase):
 
 
 class RenderContract(unittest.TestCase):
+    def test_one_percent_usage_has_visible_fill_inside_outline(self):
+        image = Image.new("L", (300, 300), 255)
+        draw = ImageDraw.Draw(image)
+
+        with mock.patch.object(app, "_font", return_value=ImageFont.load_default()):
+            app._usage_block(
+                draw, (0, 0, 300, 300), "Claude", [("7d", 1, "")], False
+            )
+
+        # Bar starts at x=99 with a 3px outline. A non-zero value must fill
+        # at least the first interior pixel instead of disappearing under it.
+        self.assertEqual(image.getpixel((102, 70)), 0)
+
     def test_empty_fixture_render_is_deterministic_png(self):
         widgets = app.DASH_WIDGETS
         try:

@@ -640,9 +640,17 @@ def _usage_block(d, box, title, rows, stale):
     for i, (label, pct, reset) in enumerate(rows):
         ry = yy + i * rh
         d.text((x, ry), label, font=lf, fill=0)
-        d.rectangle((bx0, ry, bx1, ry + bh), outline=0, width=3)
         if pct is not None:
-            d.rectangle((bx0, ry, bx0 + (bx1 - bx0) * max(0, min(1, pct / 100)), ry + bh), fill=0)
+            fraction = max(0, min(1, pct / 100))
+            inner_x0, inner_x1 = bx0 + 3, bx1 - 3
+            inner_width = inner_x1 - inner_x0
+            fill_width = max(1, round(inner_width * fraction)) if fraction else 0
+            if fill_width:
+                d.rectangle(
+                    (inner_x0, ry + 3, inner_x0 + fill_width - 1, ry + bh - 3),
+                    fill=0,
+                )
+        d.rectangle((bx0, ry, bx1, ry + bh), outline=0, width=3)
         line = f"{pct}%" if pct is not None else ""
         if reset:
             line += ("  ·  " if line else "") + reset
