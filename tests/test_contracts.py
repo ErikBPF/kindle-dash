@@ -30,6 +30,8 @@ class ParserContract(unittest.TestCase):
         )
         self.assertEqual(result["session_pct"], 42)
         self.assertEqual(result["week_pct"], 63)
+        self.assertEqual(result["fable_pct"], 27)
+        self.assertEqual(result["fable_reset"], "Jul 24, 22:00")
         self.assertEqual(result["extra_pct"], 12)
         self.assertEqual(result["updated"], NOW.isoformat())
 
@@ -60,6 +62,31 @@ class ParserContract(unittest.TestCase):
 
 
 class RenderContract(unittest.TestCase):
+    def test_claude_third_row_is_fable_limit_not_extra_spend(self):
+        usage = {
+            "session_pct": 3,
+            "session_reset": "",
+            "week_pct": 4,
+            "week_reset": "Jul 25, 08:00",
+            "fable_pct": 5,
+            "fable_reset": "Jul 26, 08:00",
+            "extra_enabled": True,
+            "extra_pct": 99,
+        }
+        with (
+            mock.patch.object(app, "read_usage", return_value=(usage, False)),
+            mock.patch.object(app, "_usage_block") as block,
+        ):
+            app.w_usage(mock.Mock(), (0, 0, 300, 300))
+        self.assertEqual(
+            block.call_args.args[3],
+            [
+                ("5h", 3, ""),
+                ("7d", 4, "Jul 25, 08:00"),
+                ("Fable", 5, "Jul 26, 08:00"),
+            ],
+        )
+
     def test_one_percent_usage_has_visible_fill_inside_outline(self):
         image = Image.new("L", (300, 300), 255)
         draw = ImageDraw.Draw(image)

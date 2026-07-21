@@ -320,6 +320,16 @@ def parse_claude_usage(data, now=None):
 
     s, w = data.get("five_hour") or {}, data.get("seven_day") or {}
     extra = data.get("extra_usage") or {}
+    fable = next(
+        (
+            limit
+            for limit in data.get("limits") or []
+            if limit.get("kind") == "weekly_scoped"
+            and ((limit.get("scope") or {}).get("model") or {}).get("display_name")
+            == "Fable"
+        ),
+        {},
+    )
 
     def pct(value):
         return round(value["utilization"]) if value.get("utilization") is not None else None
@@ -327,6 +337,8 @@ def parse_claude_usage(data, now=None):
     return {
         "session_pct": pct(s), "session_reset": fmt(s.get("resets_at")),
         "week_pct": pct(w), "week_reset": fmt(w.get("resets_at")),
+        "fable_pct": round(fable["percent"]) if fable.get("percent") is not None else None,
+        "fable_reset": fmt(fable.get("resets_at")),
         "extra_enabled": bool(extra.get("is_enabled")),
         "extra_pct": pct(extra),
         "extra_used": extra.get("used_credits"),
@@ -747,25 +759,11 @@ def _rows(usage, keys):
     return [(label, usage.get(f"{k}_pct"), usage.get(f"{k}_reset", "")) for label, k in keys]
 
 
-def _money(minor_units, currency):
-    """Format provider credit fields, which are denominated in minor units."""
-    try:
-        amount = float(minor_units) / 100
-    except (TypeError, ValueError):
-        return ""
-    prefix = "$" if currency == "USD" else f"{currency} "
-    return f"{prefix}{amount:,.2f}"
-
-
 def w_usage(d, box):
     usage, stale = read_usage()
     rows = _rows(usage, [("5h", "session"), ("7d", "week")]) if usage else []
-    if usage and usage.get("extra_enabled"):
-        used, limit = usage.get("extra_used"), usage.get("extra_limit")
-        currency = usage.get("extra_currency", "USD")
-        used_text, limit_text = _money(used, currency), _money(limit, currency)
-        detail = f"{used_text} / {limit_text}" if used_text and limit_text else ""
-        rows.append(("Extra", usage.get("extra_pct"), detail))
+    if usage:
+        rows.append(("Fable", usage.get("fable_pct"), usage.get("fable_reset", "")))
     _usage_block(d, box, "Claude", rows, stale)
 
 
