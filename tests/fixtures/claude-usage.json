@@ -1,6 +1,14 @@
 {
   "five_hour": {"utilization": 41.6, "resets_at": "2026-07-19T22:00:00+00:00"},
   "seven_day": {"utilization": 63.2, "resets_at": "2026-07-25T22:00:00+00:00"},
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "percent": 27,
+      "resets_at": "2026-07-24T22:00:00+00:00",
+      "scope": {"model": {"display_name": "Fable", "id": null}, "surface": null}
+    }
+  ],
   "extra_usage": {
     "is_enabled": true,
     "utilization": 12.5,
