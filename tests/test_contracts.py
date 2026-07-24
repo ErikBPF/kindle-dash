@@ -203,6 +203,22 @@ class PublishWorkflowContract(unittest.TestCase):
         self.assertLess(discover, watch)
 
 
+class SecurityWorkflowContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+
+    def test_trivy_scans_built_image_report_only_from_pinned_action(self):
+        build = self.workflow.index("docker build --tag kindle-dash:test renderer")
+        scan = self.workflow.index("aquasecurity/trivy-action@")
+        self.assertLess(build, scan)
+        self.assertIn(
+            "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
+            self.workflow,
+        )
+        self.assertIn("image-ref: kindle-dash:test", self.workflow)
+        self.assertIn("exit-code: \"0\"", self.workflow)
+
 class ServarrPinContract(unittest.TestCase):
     def test_updates_exactly_one_immutable_pin(self):
         with tempfile.TemporaryDirectory() as directory:
