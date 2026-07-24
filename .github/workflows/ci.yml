@@ -41,6 +41,15 @@ jobs:
       - name: Build container
         run: docker build --tag kindle-dash:test renderer
 
+      - name: Scan container
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kindle-dash:test
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
   secrets:
     runs-on: ubuntu-latest
     steps:
