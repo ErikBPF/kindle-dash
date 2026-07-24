@@ -83,6 +83,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign and verify image artifacts
+        id: provenance
         if: steps.version.outputs.publish == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -111,6 +112,26 @@ jobs:
             .SPDXID == "SPDXRef-DOCUMENT" and
             (.packages | type == "array")
           ' <<<"$sbom" >/dev/null
+
+      - name: Notify security and incidents channels
+        if: always() && steps.version.outputs.publish == 'true' && steps.provenance.outcome == 'failure'
+        env:
+          INCIDENTS_WEBHOOK: ${{ secrets.DISCORD_INCIDENTS_WEBHOOK }}
+          SECURITY_WEBHOOK: ${{ secrets.DISCORD_SECURITY_WEBHOOK }}
+        run: |
+          payload=$(jq -nc \
+            --arg version "${{ steps.version.outputs.version }}" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{allowed_mentions:{parse:[]},embeds:[{title:"RELEASE PROVENANCE FAILED",description:("Kindle image was not promoted.\n**Version:** `"+$version+"`\nNo signature or scanner output is included.\n[Open workflow]("+$url+")"),color:15548997}]}')
+          sent=false
+          for webhook in "$SECURITY_WEBHOOK" "$INCIDENTS_WEBHOOK"; do
+            [[ -n "$webhook" ]] || continue
+            curl -fsS -H "Content-Type: application/json" --data "$payload" "$webhook"
+            sent=true
+          done
+          if [[ "$sent" == false ]]; then
+            echo "::notice::Discord security/incident webhooks not configured"
+          fi
 
       - name: Tag verified merge commit
         if: steps.version.outputs.publish == 'true'
