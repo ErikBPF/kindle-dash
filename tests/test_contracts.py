@@ -118,8 +118,8 @@ class RenderContract(unittest.TestCase):
 class ReleaseVersionContract(unittest.TestCase):
     TAGS = ["v0.1.0", "not-a-version", "v0.1.1"]
 
-    def test_minor_is_default(self):
-        self.assertEqual(next_version(self.TAGS, []), "v0.2.0")
+    def test_unlabeled_change_skips_release(self):
+        self.assertIsNone(next_version(self.TAGS, []))
 
     def test_explicit_bumps(self):
         self.assertEqual(next_version(self.TAGS, ["release:patch"]), "v0.1.2")

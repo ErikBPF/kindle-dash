@@ -17,7 +17,7 @@ def release_kind(labels):
     selected = sorted(set(labels) & LABELS.keys())
     if len(selected) > 1:
         raise ValueError(f"conflicting release labels: {', '.join(selected)}")
-    return LABELS[selected[0]] if selected else "minor"
+    return LABELS[selected[0]] if selected else "none"
 
 
 def latest_version(tags):
