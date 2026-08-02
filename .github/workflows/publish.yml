@@ -118,11 +118,13 @@ jobs:
         env:
           INCIDENTS_WEBHOOK: ${{ secrets.DISCORD_INCIDENTS_WEBHOOK }}
           SECURITY_WEBHOOK: ${{ secrets.DISCORD_SECURITY_WEBHOOK }}
+          CLEYTIN_USER_ID: "1532710143517659356"
         run: |
           payload=$(jq -nc \
+            --arg cleytin "$CLEYTIN_USER_ID" \
             --arg version "${{ steps.version.outputs.version }}" \
             --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            '{allowed_mentions:{parse:[]},embeds:[{title:"RELEASE PROVENANCE FAILED",description:("Kindle image was not promoted.\n**Version:** `"+$version+"`\nNo signature or scanner output is included.\n[Open workflow]("+$url+")"),color:15548997}]}')
+            '{content:("<@"+$cleytin+">") ,allowed_mentions:{users:[$cleytin]},embeds:[{title:"RELEASE PROVENANCE FAILED",description:("Kindle image was not promoted.\n**Version:** `"+$version+"`\nNo signature or scanner output is included.\n[Open workflow]("+$url+")"),color:15548997}]}')
           sent=false
           for webhook in "$SECURITY_WEBHOOK" "$INCIDENTS_WEBHOOK"; do
             [[ -n "$webhook" ]] || continue
