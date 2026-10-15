@@ -61,6 +61,7 @@ HA_CALENDAR_ENTITY = os.environ.get("HA_CALENDAR_ENTITY", "")
 HA_SUN_ENTITY = os.environ.get("HA_SUN_ENTITY", "sun.sun")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "3"))
 MAX_EVENTS = int(os.environ.get("DASH_MAX_EVENTS", "4"))
+EVENT_GRACE_MIN = int(os.environ.get("DASH_EVENT_GRACE_MIN", "15"))  # past-event hide delay
 DASH_POLL_MIN = int(os.environ.get("DASH_POLL_MIN", "5"))  # HA refresh cadence
 
 # Claude usage (optional) — fetched from the OAuth usage API; the short-lived
@@ -187,7 +188,11 @@ def fetch_sun():
 
 
 def fetch_events():
-    """List of (HH:MM-or-'all day', summary) for today, time-sorted, or None."""
+    """List of (start_dt, HH:MM-or-'all day', summary) for today, time-sorted, or None.
+
+    start_dt is None for an all-day event. visible_events() uses it to hide
+    events that have passed and to cap the rows.
+    """
     if not HA_CALENDAR_ENTITY:
         return None
     now = datetime.now(TZINFO)
@@ -208,9 +213,21 @@ def fetch_events():
         if dt:
             out.append((dt, dt.strftime("%H:%M"), summary))
         else:
-            out.append((start, "all day", summary))
-    out.sort(key=lambda t: t[0])
-    return [(lbl, s) for _, lbl, s in out[:MAX_EVENTS]]
+            out.append((None, "all day", summary))
+    out.sort(key=lambda t: t[0] or start)
+    return out
+
+
+def visible_events(events, now):
+    """The first MAX_EVENTS agenda rows as [(label, summary)].
+
+    A timed event hides EVENT_GRACE_MIN after its start (an 08:00 event shows
+    until 08:15). This runs at render time, not in the HA poll, so an event
+    hides on time even between polls.
+    """
+    grace = timedelta(minutes=EVENT_GRACE_MIN)
+    rows = [(lbl, s) for dt, lbl, s in events if dt is None or now <= dt + grace]
+    return rows[:MAX_EVENTS]
 
 
 # --- HA data cache: a background thread keeps render() free of network I/O --
@@ -721,6 +738,7 @@ def w_agenda(d, box):
     if events is None:
         d.text((x, yy), "no calendar", font=f, fill=0)
         return
+    events = visible_events(events, datetime.now(TZINFO))
     if not events:
         d.text((x, yy), "nothing scheduled", font=f, fill=0)
         return
