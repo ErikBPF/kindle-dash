@@ -74,9 +74,28 @@ if [ "$STOP_FRAMEWORK" = 1 ]; then
   stop lab126_gui 2>/dev/null || /etc/init.d/framework stop 2>/dev/null
 fi
 
+# Battery level for the dashboard's battery widget, as a query string
+# ("battery=82&charging=0"), or nothing if powerd doesn't report it.
+battery_query() {
+  lvl=$(lipc-get-prop com.lab126.powerd battLevel 2>/dev/null)
+  case "$lvl" in ''|*[!0-9]*) return ;; esac
+  chg=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)
+  [ "$chg" = 1 ] || chg=0
+  echo "battery=$lvl&charging=$chg"
+}
+
+fetch() {
+  url="$URL"
+  b=$(battery_query)
+  if [ -n "$b" ]; then
+    case "$URL" in *\?*) url="$URL&$b" ;; *) url="$URL?$b" ;; esac
+  fi
+  curl -s -m 30 -o "$IMG" "$url"
+}
+
 i=0
 while true; do
-  if curl -s -m 30 -o "$IMG" "$URL"; then
+  if fetch; then
     if [ $((i % FULL_EVERY)) -eq 0 ]; then paint 1; else paint 0; fi
   fi
   # re-assert each cycle — the framework can reset it after a while

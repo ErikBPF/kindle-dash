@@ -8,6 +8,8 @@ Endpoints:
   GET /dash.png[?rotate=90]   Rendered dashboard (grayscale PNG). rotate spins
                               the image so a landscape design fills a portrait
                               framebuffer when the device is mounted sideways.
+     [&battery=82&charging=1] The device's battery, for the battery widget
+                              (dashboard.sh sends it on every fetch).
   GET /healthz                Liveness probe.
 
 Layout is slot-based: render() lays out a grid of boxes and hands each to a
@@ -49,7 +51,7 @@ DASH_ROTATE = int(os.environ.get("DASH_ROTATE", "0"))
 DASH_DARK = os.environ.get("DASH_DARK", "0").lower() in ("1", "true", "yes", "on")
 DASH_WIDGETS = [
     w.strip()
-    for w in os.environ.get("DASH_WIDGETS", "clock,weather,forecast,agenda,sunmoon,usage").split(",")
+    for w in os.environ.get("DASH_WIDGETS", "clock,weather,forecast,agenda,sunmoon,usage,battery").split(",")
     if w.strip()
 ]
 
@@ -671,6 +673,17 @@ def _usage_block(d, box, title, rows, stale):
         d.text((bx0, ry + bh + h * 0.01), _trunc(d, line, sf, bx1 - bx0), font=sf, fill=0)
 
 
+def parse_battery(q):
+    """(pct, charging) from the device's ?battery=&charging= query, or None."""
+    try:
+        pct = int(q["battery"][0])
+    except (KeyError, ValueError):
+        return None
+    if not 0 <= pct <= 100:
+        return None
+    return pct, q.get("charging", ["0"])[0] == "1"
+
+
 # --- widgets: each draws inside box = (x, y, w, h) -------------------------
 def w_clock(d, box):
     x, y, w, h = box
@@ -754,6 +767,39 @@ def w_sunmoon(d, box):
     d.text((mcx + mr + 12, mcy - h * 0.12), name, font=f, fill=0)
 
 
+def w_battery(d, box, battery=None):
+    """Kindle battery, right-aligned: "82%" and a small filled battery glyph.
+
+    battery = (pct, charging) from the request (see parse_battery). Nothing is
+    drawn when the device does not send it. A bolt shows while it charges.
+    """
+    if battery is None:
+        return
+    pct, charging = battery
+    x, y, w, h = box
+    cy = y + h / 2
+    lw = max(2, round(h * 0.09))
+    bh = h * 0.7
+    nub = bh * 0.15
+    bx1 = x + w - nub
+    bx0 = bx1 - bh * 1.9
+    d.rectangle((bx0, cy - bh / 2, bx1, cy + bh / 2), outline=0, width=lw)
+    d.rectangle((bx1, cy - bh * 0.22, bx1 + nub, cy + bh * 0.22), fill=0)
+    gap = lw + 2
+    fill = round((bx1 - bx0 - 2 * gap) * pct / 100)
+    if fill:
+        d.rectangle((bx0 + gap, cy - bh / 2 + gap, bx0 + gap + fill - 1, cy + bh / 2 - gap), fill=0)
+    f = _font(False, h * 0.75)
+    tx = bx0 - h * 0.3
+    d.text((tx, cy), f"{pct}%", font=f, fill=0, anchor="rm")
+    if charging:
+        bw, bolt_h = h * 0.4, h * 0.7
+        ox = tx - d.textlength(f"{pct}%", font=f) - h * 0.2 - bw
+        oy = cy - bolt_h / 2
+        pts = [(0.6, 0), (0, 0.55), (0.45, 0.55), (0.35, 1), (1, 0.4), (0.55, 0.4)]
+        d.polygon([(ox + px * bw, oy + py * bolt_h) for px, py in pts], fill=0)
+
+
 def _rows(usage, keys):
     """Build _usage_block rows [(label, pct, reset)] from a cached usage dict."""
     return [(label, usage.get(f"{k}_pct"), usage.get(f"{k}_reset", "")) for label, k in keys]
@@ -790,6 +836,7 @@ WIDGET_FNS = {
     "clock": w_clock, "weather": w_weather, "agenda": w_agenda,
     "forecast": w_forecast, "sunmoon": w_sunmoon,
     "usage": w_usage, "codex": w_codex, "opencode": w_opencode,
+    "battery": w_battery,
 }
 # Providers that share the bottom usage strip (split into columns, in order).
 USAGE_NAMES = ("usage", "codex", "opencode")
@@ -798,9 +845,10 @@ USAGE_NAMES = ("usage", "codex", "opencode")
 USAGE_ROWS = 3
 
 
-def render(rotate=None):
+def render(rotate=None, battery=None):
     # rotate: None → use DASH_ROTATE (the container setting). A ?rotate= query
     # can still override per-request, but the device never needs to.
+    # battery: (pct, charging) the device sent with this request, or None.
     if rotate is None:
         rotate = DASH_ROTATE
     W, H = KINDLE_W, KINDLE_H
@@ -822,6 +870,8 @@ def render(rotate=None):
         "agenda": (pad, mid_y, mid - 2 * pad, midrow),
         "forecast": (mid, mid_y, rcol, midrow * 0.45),
         "sunmoon": (mid, mid_y + midrow * 0.5, rcol, midrow * 0.5),
+        # small, in the top-right corner above the weather
+        "battery": (W - pad - W * 0.2, pad, W * 0.2, H * 0.034),
     }
     # The bottom strip is the usage zone: split it into equal columns, one per
     # enabled usage provider (Claude / Codex / opencode), in DASH_WIDGETS order.
@@ -841,7 +891,7 @@ def render(rotate=None):
         if not (fn and box):
             continue
         try:
-            fn(d, box)
+            fn(d, box, battery) if name == "battery" else fn(d, box)
         except Exception as e:
             print(f"[widget] {name} failed: {e}", flush=True)
 
@@ -871,7 +921,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 rotate = None
             try:
-                png = render(rotate)
+                png = render(rotate, parse_battery(q))
             except Exception as e:
                 print(f"[render] failed: {e}", flush=True)
                 self.send_response(500)
