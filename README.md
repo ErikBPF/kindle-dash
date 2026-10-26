@@ -1,6 +1,6 @@
 # kindle-dash
 
-Turn a dead/old jailbroken Kindle into a calm, glare-free **e-ink wall dashboard** — clock, weather, a 3-day forecast, today's agenda, sun & moon, and your live **AI subscription usage** (Claude · Codex · opencode) — rendered server-side and painted by the device on a timer.
+Turn a dead/old jailbroken Kindle into a calm, glare-free **e-ink wall dashboard** — clock, weather, a 3-day forecast, today's agenda, sun & moon, and your live **AI subscription usage** (Claude · Codex · opencode · OpenRouter) — rendered server-side and painted by the device on a timer.
 
 > *Your Kindle didn't die. It ascended into furniture.*
 
@@ -15,9 +15,9 @@ No glowing rectangle, no app, no cloud account. A tiny container renders a grays
 - **Clock + date** — big, 24-hour, minute-aligned so it never drifts.
 - **Weather now** — temperature, condition, "feels like", drawn icon (no icon fonts to ship).
 - **Forecast** — next N days (hi/lo + icon).
-- **Agenda** — today's calendar events.
+- **Agenda** — today's events, merged from one or more calendars.
 - **Sun & moon** — sunrise/sunset + a computed moon-phase glyph.
-- **AI usage** — live subscription limits side by side: Claude (5h/7d/Extra), Codex (available windows/Credits), opencode Go (5h/Week/Month). Columns size themselves to however many you enable.
+- **AI usage** — live subscription limits side by side: Claude (5h/7d/Extra), Codex (available windows/Credits), opencode Go (5h/Week/Month), OpenRouter (this month's USD spend). Columns size themselves to however many you enable.
 
 Every panel is optional. A panel with no data source configured just renders a quiet placeholder — never a broken image.
 
@@ -32,7 +32,7 @@ A 6-inch e-ink screen is the *perfect* ambient display: paper-like, sunlight-rea
   │  kindle-dash renderer (container, Python + Pillow)                   │
   │    • lays out a grid of WIDGETS, draws a grayscale PNG               │
   │    • pulls: Home Assistant (weather/forecast/sun/agenda)             │
-  │            Claude/Codex usage API + opencode dashboard scrape        │
+  │            Claude/Codex/OpenRouter usage API + opencode scrape       │
   │    • serves GET /dash.png  (plain HTTP — the Kindle can't do TLS)    │
   └───────────────────────────────┬──────────────────────────────────────┘
                                    │  http (LAN)
@@ -76,15 +76,16 @@ Then set up the device (jailbreak, `dashboard.sh`, KUAL Start/Stop). Full walkth
 | [CONFIGURATION.md](CONFIGURATION.md) | every env var, data sources, resolution/rotation |
 | [USAGE.md](USAGE.md) | Start/Stop, refresh cadence, troubleshooting |
 | [WIDGETS.md](WIDGETS.md) | the roadmap + how to add your own widget |
-| [SECURITY.md](SECURITY.md) | usage-panel credential caveats — Claude/Codex tokens, opencode cookie (read before enabling) |
+| [SECURITY.md](SECURITY.md) | usage-panel credential caveats — Claude/Codex tokens, opencode cookie, OpenRouter management key (read before enabling) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | dev shell (devenv), conventions |
 
 ## A word on the usage panels
 
-All three lean on **unofficial** plumbing — they're opt-in and disappear when unconfigured:
+Claude, Codex, and opencode lean on **unofficial** plumbing; OpenRouter uses its documented API but needs a powerful key. All are opt-in and disappear when unconfigured:
 
 - **Claude & Codex** call undocumented OAuth usage endpoints with a token the renderer refreshes itself. Give the dashboard its **own** login for each (not your laptop's) — refresh tokens rotate, and sharing one lineage eventually logs the other out.
 - **opencode** has **no usage API at all**, so that panel scrapes the Go dashboard HTML with a browser session cookie. The cookie expires every few days with no refresh path — re-grab it with `tools/opencode-capture.py` when the panel goes `(stale)`.
+- **OpenRouter** needs a **management** key to sum spend across all keys — it can also create and delete keys, so give the dashboard its own and keep it secret.
 
 The whole story (and how to seed each safely) is in [SECURITY.md](SECURITY.md).
 

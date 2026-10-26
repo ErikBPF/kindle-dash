@@ -57,7 +57,10 @@ DASH_WIDGETS = [
 HA_BASE_URL = os.environ.get("HA_BASE_URL", "").rstrip("/")
 HA_TOKEN = os.environ.get("HA_TOKEN", "")
 HA_WEATHER_ENTITY = os.environ.get("HA_WEATHER_ENTITY", "")
-HA_CALENDAR_ENTITY = os.environ.get("HA_CALENDAR_ENTITY", "")
+# Comma list: the agenda merges every calendar into one time-sorted list.
+HA_CALENDAR_ENTITIES = [
+    c.strip() for c in os.environ.get("HA_CALENDAR_ENTITY", "").split(",") if c.strip()
+]
 HA_SUN_ENTITY = os.environ.get("HA_SUN_ENTITY", "sun.sun")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "3"))
 MAX_EVENTS = int(os.environ.get("DASH_MAX_EVENTS", "4"))
@@ -109,6 +112,16 @@ OPENCODE_USER_AGENT = os.environ.get(
 )
 OPENCODE_POLL_MIN = int(os.environ.get("OPENCODE_POLL_MIN", "15"))
 OPENCODE_USAGE_FILE = os.path.join(STATE_DIR, "opencode_usage.json")
+
+# OpenRouter monthly spend (optional) — sums usage_monthly (USD, current UTC
+# month) over every key in the default workspace. Listing keys needs a
+# MANAGEMENT key (it can also create/delete keys — see SECURITY.md). Keys
+# deleted this month drop out of the sum. BYOK spend is not included.
+OPENROUTER_MANAGEMENT_KEY = os.environ.get("OPENROUTER_MANAGEMENT_KEY", "")
+OPENROUTER_KEYS_URL = os.environ.get("OPENROUTER_KEYS_URL", "https://openrouter.ai/api/v1/keys")
+OPENROUTER_MONTH_BUDGET = float(os.environ.get("OPENROUTER_MONTH_BUDGET") or 0) or None
+OPENROUTER_POLL_MIN = int(os.environ.get("OPENROUTER_POLL_MIN", "15"))
+OPENROUTER_USAGE_FILE = os.path.join(STATE_DIR, "openrouter_usage.json")
 
 
 @functools.lru_cache(maxsize=None)
@@ -187,35 +200,48 @@ def fetch_sun():
     return _local(a.get("next_rising")), _local(a.get("next_setting"))
 
 
-def fetch_events():
-    """List of (start_dt, HH:MM-or-'all day', summary) for today, time-sorted, or None.
+def parse_events(calendars, start):
+    """Merge HA calendar event lists into [(start_dt-or-None, label, summary)].
 
-    start_dt is None for an all-day event. visible_events() uses it to hide
-    events that have passed and to cap the rows.
+    Time-sorted, all-day and already-started events first. An event that is on
+    more than one calendar (e.g. a meeting invite) shows once. A timed event
+    that began before today (e.g. overnight) shows as '→HH:MM' (its end) with
+    the all-day ones; its start is None so visible_events keeps it all day. An
+    event with no title (e.g. from a free/busy-only share) shows as 'busy'.
     """
-    if not HA_CALENDAR_ENTITY:
+    out = {}
+    for ev in (ev for data in calendars for ev in data):
+        so = ev.get("start", {})
+        summary = ev.get("summary") or "busy"  # free/busy-only shares have no title
+        dt = _local(so.get("dateTime")) if "dateTime" in so else None
+        if dt and dt < start:
+            end = _local(ev.get("end", {}).get("dateTime"))
+            label = end.strftime("→%H:%M") if end and end < start + timedelta(days=1) else "all day"
+            out.setdefault((start, summary), (None, label))
+        elif dt:
+            out.setdefault((dt, summary), (dt, dt.strftime("%H:%M")))
+        else:
+            out.setdefault((start, summary), (None, "all day"))
+    rows = sorted(out.items(), key=lambda kv: (kv[0][0], kv[1][1] != "all day"))
+    return [(dt, lbl, s) for (_, s), (dt, lbl) in rows]
+
+
+def fetch_events():
+    """Today's events from every HA_CALENDAR_ENTITY as (start_dt, label, summary), or None.
+
+    start_dt is None for all-day and already-started events. visible_events()
+    uses it to hide events that have passed and to cap the rows.
+    """
+    if not HA_CALENDAR_ENTITIES:
         return None
     now = datetime.now(TZINFO)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    data = _ha(
-        "GET",
-        f"/api/calendars/{HA_CALENDAR_ENTITY}",
-        start=start.isoformat(),
-        end=(start + timedelta(days=1)).isoformat(),
-    )
-    if not data:
+    params = {"start": start.isoformat(), "end": (start + timedelta(days=1)).isoformat()}
+    calendars = [_ha("GET", f"/api/calendars/{c}", **params) for c in HA_CALENDAR_ENTITIES]
+    calendars = [data for data in calendars if data is not None]
+    if not calendars:  # every fetch failed; [] is a real "nothing today"
         return None
-    out = []
-    for ev in data:
-        so = ev.get("start", {})
-        summary = ev.get("summary", "(no title)")
-        dt = _local(so.get("dateTime")) if "dateTime" in so else None
-        if dt:
-            out.append((dt, dt.strftime("%H:%M"), summary))
-        else:
-            out.append((None, "all day", summary))
-    out.sort(key=lambda t: t[0] or start)
-    return out
+    return parse_events(calendars, start)
 
 
 def visible_events(events, now):
@@ -584,6 +610,43 @@ def fetch_opencode_once():
     return parse_opencode_usage(r.text)
 
 
+# --- OpenRouter usage: sum this month's spend across all API keys ----------
+def parse_openrouter_usage(keys, now=None):
+    """Normalize a list of OpenRouter key objects without network or credentials."""
+    now = now or datetime.now(timezone.utc)
+    utc = now.astimezone(timezone.utc)
+    # usage_monthly resets at 00:00 UTC on the 1st.
+    nxt = datetime(utc.year + utc.month // 12, utc.month % 12 + 1, 1, tzinfo=timezone.utc)
+    return {
+        "month_usd": round(sum(float(k.get("usage_monthly") or 0) for k in keys), 2),
+        "month_reset": _reset_fmt(at=nxt.timestamp()),
+        "keys": len(keys),
+        "updated": now.isoformat(),
+    }
+
+
+def fetch_openrouter_once():
+    keys, seen = [], set()
+    while True:
+        r = requests.get(
+            OPENROUTER_KEYS_URL,
+            headers={"Authorization": f"Bearer {OPENROUTER_MANAGEMENT_KEY}"},
+            params={"include_disabled": "true", "include_expired": "true", "offset": len(keys)},
+            timeout=15,
+        )
+        r.raise_for_status()
+        page = r.json().get("data")
+        if not isinstance(page, list):
+            raise RuntimeError("no key list in response")
+        # Stop on an empty page, or on one with no new keys (offset ignored).
+        new = [k for k in page if k.get("hash") not in seen]
+        if not new:
+            break
+        seen.update(k.get("hash") for k in new)
+        keys += new
+    return parse_openrouter_usage(keys)
+
+
 # --- drawing primitives ----------------------------------------------------
 def draw_weather_icon(dr, cx, cy, r, cond):
     """Filled grayscale weather glyph centred at (cx, cy), scale r, by condition."""
@@ -653,7 +716,11 @@ def _trunc(d, s, font, avail):
 
 
 def _usage_block(d, box, title, rows, stale):
-    """Draw a titled column of labeled % bars. rows = [(label, pct, reset)]."""
+    """Draw a titled column of labeled % bars. rows = [(label, pct, reset)].
+
+    A row may add a 4th item, the bar fill %, to fill the bar without printing
+    a % (OpenRouter shows USD text over a budget bar).
+    """
     x, y, w, h = box
     d.text((x, y), title + ("  (stale)" if stale else ""), font=_font(True, h * 0.12), fill=0)
     yy = y + h * 0.2
@@ -666,11 +733,12 @@ def _usage_block(d, box, title, rows, stale):
     rh = (h - (yy - y)) / USAGE_ROWS
     bh = min(rh * 0.34, h * 0.1)
     bx0, bx1 = x + w * 0.33, x + w * 0.97
-    for i, (label, pct, reset) in enumerate(rows):
+    for i, (label, pct, reset, *bar) in enumerate(rows):
         ry = yy + i * rh
         d.text((x, ry), label, font=lf, fill=0)
-        if pct is not None:
-            fraction = max(0, min(1, pct / 100))
+        bar_pct = bar[0] if bar else pct
+        if bar_pct is not None:
+            fraction = max(0, min(1, bar_pct / 100))
             inner_x0, inner_x1 = bx0 + 3, bx1 - 3
             inner_width = inner_x1 - inner_x0
             fill_width = max(1, round(inner_width * fraction)) if fraction else 0
@@ -804,13 +872,26 @@ def w_opencode(d, box):
     _usage_block(d, box, "opencode", _rows(usage, keys) if usage else [], stale)
 
 
+def w_openrouter(d, box):
+    usage, stale = read_usage(OPENROUTER_USAGE_FILE)
+    rows = []
+    if usage:
+        spend, budget = usage["month_usd"], OPENROUTER_MONTH_BUDGET
+        text = f"${spend:.2f}" + (f" / ${budget:g}" if budget else "")
+        if usage.get("month_reset"):
+            text += f"  ·  {usage['month_reset']}"
+        rows.append(("Month", None, text, round(100 * spend / budget) if budget else None))
+    _usage_block(d, box, "OpenRouter", rows, stale)
+
+
 WIDGET_FNS = {
     "clock": w_clock, "weather": w_weather, "agenda": w_agenda,
     "forecast": w_forecast, "sunmoon": w_sunmoon,
     "usage": w_usage, "codex": w_codex, "opencode": w_opencode,
+    "openrouter": w_openrouter,
 }
 # Providers that share the bottom usage strip (split into columns, in order).
-USAGE_NAMES = ("usage", "codex", "opencode")
+USAGE_NAMES = ("usage", "codex", "opencode", "openrouter")
 # Row slots reserved per usage column = the most any provider shows (Claude /
 # opencode = 3). Fixing this gives every column the same row pitch so bars align.
 USAGE_ROWS = 3
@@ -922,6 +1003,12 @@ if __name__ == "__main__":
         threading.Thread(
             target=_usage_poll,
             args=(fetch_opencode_once, OPENCODE_USAGE_FILE, "opencode", OPENCODE_POLL_MIN),
+            daemon=True,
+        ).start()
+    if OPENROUTER_MANAGEMENT_KEY:
+        threading.Thread(
+            target=_usage_poll,
+            args=(fetch_openrouter_once, OPENROUTER_USAGE_FILE, "openrouter", OPENROUTER_POLL_MIN),
             daemon=True,
         ).start()
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
