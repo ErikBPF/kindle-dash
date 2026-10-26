@@ -198,14 +198,13 @@ class RenderContract(unittest.TestCase):
             # The same invite on both calendars shows once.
             {"start": at(15), "summary": "Gym"},
         ]
-        with mock.patch.object(app, "MAX_EVENTS", 10):
-            result = app.parse_events([personal, work], start)
+        result = app.parse_events([personal, work], start)
         self.assertEqual(result, [
-            ("all day", "Birthday"),
-            ("→05:30", "Sleep"),
-            ("09:30", "Standup"),
-            ("11:00", "busy"),
-            ("15:00", "Gym"),
+            (None, "all day", "Birthday"),
+            (None, "→05:30", "Sleep"),
+            (start + timedelta(hours=9.5), "09:30", "Standup"),
+            (start + timedelta(hours=11), "11:00", "busy"),
+            (start + timedelta(hours=15), "15:00", "Gym"),
         ])
 
     def test_agenda_keeps_calendars_that_fetched(self):
@@ -214,7 +213,7 @@ class RenderContract(unittest.TestCase):
             mock.patch.object(app, "HA_CALENDAR_ENTITIES", ["calendar.a", "calendar.b"]),
             mock.patch.object(app, "_ha", side_effect=[None, work]),
         ):
-            self.assertEqual(app.fetch_events(), [("all day", "Offsite")])
+            self.assertEqual(app.fetch_events(), [(None, "all day", "Offsite")])
         with (
             mock.patch.object(app, "HA_CALENDAR_ENTITIES", ["calendar.a", "calendar.b"]),
             mock.patch.object(app, "_ha", return_value=None),
@@ -226,6 +225,41 @@ class RenderContract(unittest.TestCase):
             mock.patch.object(app, "_ha", return_value=[]),
         ):
             self.assertEqual(app.fetch_events(), [])
+
+    def test_agenda_hides_events_past_the_grace_period(self):
+        start = datetime(2026, 7, 19, tzinfo=app.TZINFO)
+
+        def at(hours):
+            return {"dateTime": (start + timedelta(hours=hours)).isoformat()}
+
+        data = [
+            {"start": at(9), "summary": "Review"},
+            {"start": {"date": "2026-07-19"}, "summary": "Birthday"},
+            {"start": at(8), "summary": "Standup"},
+            {"start": at(10), "summary": "Lunch"},
+        ]
+        with (
+            mock.patch.object(app, "HA_CALENDAR_ENTITIES", ["calendar.a"]),
+            mock.patch.object(app, "_ha", return_value=data),
+            mock.patch.object(app, "datetime", wraps=datetime) as dt,
+        ):
+            dt.now.return_value = start + timedelta(hours=7)
+            events = app.fetch_events()
+        self.assertEqual([s for _, _, s in events], ["Birthday", "Standup", "Review", "Lunch"])
+
+        def shown(hours, minutes=0):
+            now = start + timedelta(hours=hours, minutes=minutes)
+            return [s for _, s in app.visible_events(events, now)]
+
+        with mock.patch.object(app, "MAX_EVENTS", 10), mock.patch.object(app, "EVENT_GRACE_MIN", 15):
+            # An 08:00 event still shows at 08:15 ...
+            self.assertEqual(shown(8, 15), ["Birthday", "Standup", "Review", "Lunch"])
+            # ... and is gone one minute later. All-day events stay.
+            self.assertEqual(shown(8, 16), ["Birthday", "Review", "Lunch"])
+        # The row cap applies after past events are dropped.
+        with mock.patch.object(app, "MAX_EVENTS", 2):
+            self.assertEqual(app.visible_events(events, start + timedelta(hours=9)),
+                             [("all day", "Birthday"), ("09:00", "Review")])
 
     def test_empty_fixture_render_is_deterministic_png(self):
         widgets = app.DASH_WIDGETS

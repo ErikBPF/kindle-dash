@@ -29,6 +29,7 @@ Optional. Create a long-lived token: HA → Profile → Security → Long-lived 
 | `HA_SUN_ENTITY` | `sun.sun` | sunrise/sunset (moon phase is computed locally, no entity needed) |
 | `FORECAST_DAYS` | `3` | days in the forecast strip |
 | `DASH_MAX_EVENTS` | `4` | agenda rows |
+| `DASH_EVENT_GRACE_MIN` | `15` | minutes after its start that a timed event stays on the agenda (an 08:00 event shows until 08:15). All-day events stay all day. |
 
 Forecast uses HA's `weather.get_forecasts` service; if your weather integration doesn't support daily forecasts, the strip just hides.
 
