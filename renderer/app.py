@@ -248,7 +248,10 @@ def fetch_open_meteo():
             params={
                 "latitude": lat, "longitude": lon,
                 "hourly": "precipitation_probability", "timeformat": "unixtime",
-                "forecast_days": 1 + -(-RAIN_HOURS // 24),  # today + enough to cover RAIN_HOURS
+                # The response starts at 00:00 of the current UTC day (no
+                # timezone is sent), so ask for one day more than RAIN_HOURS
+                # needs: 12 h at 23:00 still has every hour.
+                "forecast_days": 1 + math.ceil(RAIN_HOURS / 24),
             },
             timeout=8,
         )

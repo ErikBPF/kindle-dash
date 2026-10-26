@@ -3,6 +3,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+import zoneinfo
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest import mock
@@ -352,6 +353,30 @@ class RenderContract(unittest.TestCase):
             self.assertEqual(app.fetch_hourly(), meteo)
         params = req.get.call_args.kwargs["params"]
         self.assertEqual((params["latitude"], params["longitude"]), (1, 2))
+
+    def test_open_meteo_window_covers_rain_hours_late_in_the_day(self):
+        sao_paulo = zoneinfo.ZoneInfo("America/Sao_Paulo")
+        for rain_hours in (12, 24):
+            for now in (
+                datetime(2026, 7, 19, 23, 0, tzinfo=timezone.utc),
+                datetime(2026, 7, 19, 23, 0, tzinfo=sao_paulo),  # 02:00Z next day
+                datetime(2026, 7, 19, 20, 30, tzinfo=sao_paulo),  # 23:30Z
+            ):
+                with (
+                    mock.patch.object(app, "RAIN_HOURS", rain_hours),
+                    mock.patch.object(app, "RAIN_LAT", "1"),
+                    mock.patch.object(app, "RAIN_LON", "2"),
+                    mock.patch.object(app, "requests") as req,
+                    mock.patch.object(app, "datetime", wraps=datetime) as dt,
+                ):
+                    dt.now.return_value = now
+                    app.fetch_open_meteo()
+                days = req.get.call_args.kwargs["params"]["forecast_days"]
+                # The response starts at 00:00 of the current UTC day.
+                utc = now.astimezone(timezone.utc)
+                end = utc.replace(hour=0, minute=0) + timedelta(days=days)
+                last = utc.replace(minute=0) + timedelta(hours=rain_hours - 1)
+                self.assertGreater(end - timedelta(hours=1), last, (rain_hours, now))
 
     def test_rain_chart_skips_past_hours(self):
         now = datetime.now(app.TZINFO).replace(minute=0, second=0, microsecond=0)
