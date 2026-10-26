@@ -1,7 +1,9 @@
 # kindle-dash — renders a grayscale dashboard PNG for a jailbroken Kindle.
 # Pulls time, optional Home Assistant data (weather/forecast/sun/calendar) and
 # optional Claude usage, and serves it at GET /dash.png for the device to fetch.
-FROM python:3.14-slim
+# Digest-pinned: this job publishes signed images, and a mutable tag can be
+# repointed. Renovate bumps the digest (python:3.14-slim).
+FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8
 
 # tzdata: local time/date on the dashboard. fonts-dejavu-core: TTFs Pillow draws
 # with (slim ships none). Both are tiny.
