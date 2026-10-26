@@ -54,13 +54,13 @@ Good HA-free candidates:
 - **Weather + forecast + sun → [Open-Meteo](https://open-meteo.com)** — free, keyless; one GET returns current, daily hi/lo, and sunrise/sunset. Covers three widgets with just a lat/lon.
 - **Agenda → an `.ics` URL** — Google/Outlook/Apple all publish one. Recurring events need an ICS library (`icalendar` + recurrence expansion).
 
-Return shapes to match: weather `(condition, temp, feels)` · forecast `[(label, condition, hi, lo), …]` · sun `(sunrise_dt, sunset_dt)` · agenda `[(time_label, summary), …]`. Return `None` on any failure.
+Return shapes to match: weather `(condition, temp, feels)` · forecast `[(label, condition, hi, lo), …]` · sun `(sunrise_dt, sunset_dt)` · agenda `[(start_dt_or_None, time_label, summary), …]` (all of today's events; `w_agenda` hides the past ones and caps the rows). Return `None` on any failure.
 
 ## Shipped
 
-Clock · Weather (now) · Forecast (N-day) · Agenda (HA calendar) · Sun & Moon (HA sun + local moon phase) · Kindle battery (sent by the device) · Claude usage (5h/7d/Extra) · Codex usage (available windows/Credits) · opencode Go usage (5h/Week/Month).
+Clock · Weather (now) · Forecast (N-day) · Agenda (one or more HA calendars) · Sun & Moon (HA sun + local moon phase) · Kindle battery (sent by the device) · Claude usage (5h/7d/Extra) · Codex usage (available windows/Credits) · opencode Go usage (5h/Week/Month) · OpenRouter spend (Month USD).
 
-The three usage providers (`usage`=Claude, `codex`, `opencode`) share one `_usage_block` renderer and split the bottom strip into a column each. Claude and Codex read OAuth usage APIs (refresh-token seeded); **opencode has no usage API, so its widget scrapes the Go dashboard HTML** with a browser cookie — see CONFIGURATION.md for the fragility caveat.
+The four usage providers (`usage`=Claude, `codex`, `opencode`, `openrouter`) share one `_usage_block` renderer and split the bottom strip into a column each. Claude and Codex read OAuth usage APIs (refresh-token seeded); OpenRouter sums `usage_monthly` over all keys with a management key; **opencode has no usage API, so its widget scrapes the Go dashboard HTML** with a browser cookie — see CONFIGURATION.md for the fragility caveat.
 
 ## Roadmap — proposed widgets
 
