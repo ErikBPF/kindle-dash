@@ -2,8 +2,11 @@ name: publish
 
 # Publish only a PR merge commit from protected main. Release labels are
 # mutually exclusive in tools/release_version.py; no label defaults to minor.
+# pull_request_target, not pull_request: a merged fork PR runs the latter with a
+# read-only GITHUB_TOKEN even when packages: write is declared, so the GHCR push
+# is denied. Only the already-merged commit is checked out below; never head SHA.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [closed]
 
@@ -25,6 +28,12 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Require the merged commit to be on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD origin/main
 
       - name: Calculate release
         id: version
