@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest import mock
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from renderer import app
 from tools.release_version import next_version, release_kind
 from tools.update_servarr_pin import update_pin
@@ -132,6 +132,55 @@ class RenderContract(unittest.TestCase):
                 ("Fable", 5, "Jul 26, 08:00"),
             ],
         )
+
+    def test_battery_query_parses_level_and_charging(self):
+        self.assertEqual(app.parse_battery({"battery": ["82"], "charging": ["1"]}), (82, True))
+        self.assertEqual(app.parse_battery({"battery": ["82"]}), (82, False))
+        for q in ({}, {"battery": ["n/a"]}, {"battery": ["150"]}):
+            self.assertIsNone(app.parse_battery(q))
+
+    def test_battery_hidden_when_device_does_not_report_it(self):
+        image = Image.new("L", (200, 30), 255)
+        app.w_battery(ImageDraw.Draw(image), (0, 0, 200, 30), None)
+        self.assertEqual(image.getextrema(), (255, 255))
+
+    def test_battery_glyph_fills_with_level(self):
+        def inside(pct):
+            image = Image.new("L", (200, 30), 255)
+            with mock.patch.object(app, "_font", return_value=ImageFont.load_default()):
+                app.w_battery(ImageDraw.Draw(image), (0, 0, 200, 30), (pct, False))
+            # Left end of the glyph's interior: filled at any non-zero level.
+            return image.getpixel((165, 15))
+
+        self.assertEqual(inside(100), 0)
+        self.assertEqual(inside(0), 255)
+
+    @unittest.skipUnless(
+        pathlib.Path(app.FONT_DIR, "DejaVuSans-Bold.ttf").exists(),
+        "needs the DejaVu fonts (DASH_FONT_DIR): the overlap depends on their widths",
+    )
+    def test_long_temperature_stays_clear_of_the_battery(self):
+        def frame(widgets, temp):
+            with (
+                mock.patch.object(app, "KINDLE_W", 1024),
+                mock.patch.object(app, "KINDLE_H", 758),
+                mock.patch.object(app, "DASH_WIDGETS", widgets),
+                mock.patch.dict(app.HA_DATA, {"weather": ("sunny", temp, temp)}),
+            ):
+                return Image.open(BytesIO(app.render(rotate=0, battery=(100, True))))
+
+        battery = frame(["battery"], 100)
+        # The battery with its bolt (the header row, above the first rule),
+        # plus the half-pad gap to its left.
+        x0, y0, x1, y1 = ImageOps.invert(battery.crop((0, 0, 1024, 150))).getbbox()
+        x0 -= max(16, 1024 // 42) // 2
+        # 100° (a °F afternoon) and -10° ran into the bolt before.
+        for temp in (100, -10, 21):
+            both = frame(["weather", "battery"], temp)
+            self.assertNotEqual(both.tobytes(), battery.tobytes())  # the temperature is drawn
+            self.assertEqual(
+                both.crop((x0, y0, x1, y1)).tobytes(), battery.crop((x0, y0, x1, y1)).tobytes(), temp
+            )
 
     def openrouter_rows(self, budget):
         usage = {"month_usd": 12.4, "month_reset": "Aug 01, 00:00"}
