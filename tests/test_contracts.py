@@ -389,6 +389,37 @@ class RenderContract(unittest.TestCase):
         # inside of its bar stays white.
         self.assertEqual(image.getpixel((16, 70)), 255)
 
+    def test_rain_chart_labels_fit_their_columns(self):
+        now = datetime.now(app.TZINFO).replace(minute=0, second=0, microsecond=0)
+        box = (0, 0, 468, 103)  # the rain box in a 1024x758 frame
+        for rain_hours in (12, 20, 24, 48):
+            hourly = [(now + timedelta(hours=i), 100 if i % 2 else 7) for i in range(rain_hours)]
+            draw = ImageDraw.Draw(Image.new("L", box[2:], 255))
+            with (
+                mock.patch.object(app, "RAIN_HOURS", rain_hours),
+                mock.patch.dict(app.HA_DATA, {"hourly": hourly}),
+                mock.patch.object(draw, "text", wraps=draw.text) as text,
+            ):
+                app.w_rain(draw, box)
+            cw = box[2] / rain_hours
+            hour_spans, pct_count = [], 0
+            for call in text.call_args_list[1:]:  # [0] is the title
+                (cx, ty), label = call.args
+                left, _, right, _ = draw.textbbox((cx, ty), label, font=call.kwargs["font"], anchor="ma")
+                if label.endswith("%"):
+                    pct_count += 1
+                    i = int(cx // cw)
+                    self.assertGreaterEqual(left, i * cw, (rain_hours, label))
+                    self.assertLessEqual(right, (i + 1) * cw, (rain_hours, label))
+                else:
+                    hour_spans.append((left, right))
+            # Hour labels keep a visible gap between them.
+            for (_, prev_right), (next_left, _) in zip(hour_spans, hour_spans[1:]):
+                self.assertGreaterEqual(next_left - prev_right, 3, rain_hours)
+            if rain_hours == 12:
+                # The default chart keeps a value and an hour on every column.
+                self.assertEqual((pct_count, len(hour_spans)), (12, 12))
+
     def test_empty_fixture_render_is_deterministic_png(self):
         widgets = app.DASH_WIDGETS
         try:

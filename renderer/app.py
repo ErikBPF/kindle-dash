@@ -941,17 +941,25 @@ def w_rain(d, box):
     bw = cw * 0.6
     top, base = y + h * 0.40, y + h * 0.80
     # Shrink the value font until the widest label ("100%") fits its column.
+    # Past the floor size (RAIN_HOURS ~20+ on a 1024 frame) drop the values:
+    # the bars still show the chance.
     vf = f
     while vf.size > 8 and d.textlength("100%", font=vf) > cw * 0.92:
         vf = _font(False, vf.size - 1)
+    show_pct = d.textlength("100%", font=vf) <= cw * 0.92
+    # Label every hour when "00" fits its column with a clear gap, else every
+    # 2nd, 3rd, ... hour.
+    step = max(1, math.ceil(d.textlength("00", font=f) / (cw * 0.8)))
     for i, (dt, pct) in enumerate(hours):
         cx = x + cw * (i + 0.5)
         d.rectangle((cx - bw / 2, top, cx + bw / 2, base), outline=0, width=1)  # 100% track
         if pct:
             d.rectangle((cx - bw / 2, base - (base - top) * min(pct, 100) / 100, cx + bw / 2, base), fill=0)
-        label = "—" if pct is None else f"{pct}%"
-        d.text((cx, y + h * 0.22), label, font=vf, fill=0, anchor="ma")
-        d.text((cx, base + h * 0.05), dt.strftime("%H"), font=f, fill=0, anchor="ma")
+        if show_pct:
+            label = "—" if pct is None else f"{pct}%"
+            d.text((cx, y + h * 0.22), label, font=vf, fill=0, anchor="ma")
+        if i % step == 0:
+            d.text((cx, base + h * 0.05), dt.strftime("%H"), font=f, fill=0, anchor="ma")
     d.line((x, base, x + cw * len(hours), base), fill=0, width=2)
 
 

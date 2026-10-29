@@ -28,7 +28,7 @@ Optional. Create a long-lived token: HA → Profile → Security → Long-lived 
 | `HA_CALENDAR_ENTITY` | `calendar.personal,calendar.work` | agenda (blank = hidden). Comma list: events from every calendar merge into one time-sorted list, and an event on more than one calendar shows once. An event with no title (for example from a calendar shared as free/busy only) shows as `busy`. |
 | `HA_SUN_ENTITY` | `sun.sun` | sunrise/sunset |
 | `FORECAST_DAYS` | `3` | days in the forecast strip |
-| `RAIN_HOURS` | `12` | hours in the rain chart (from the current hour) |
+| `RAIN_HOURS` | `12` | hours in the rain chart (from the current hour). At about 20 or more, the % labels are not shown and the hour labels skip hours, so the text fits |
 | `RAIN_LAT` / `RAIN_LON` | HA home location | location for the Open-Meteo rain fallback (below) |
 | `DASH_MAX_EVENTS` | `4` | agenda rows |
 | `DASH_EVENT_GRACE_MIN` | `15` | minutes after its start that a timed event stays on the agenda (an 08:00 event shows until 08:15). All-day events stay all day. |
