@@ -3,6 +3,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+import zoneinfo
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest import mock
@@ -309,6 +310,115 @@ class RenderContract(unittest.TestCase):
         with mock.patch.object(app, "MAX_EVENTS", 2):
             self.assertEqual(app.visible_events(events, start + timedelta(hours=9)),
                              [("all day", "Birthday"), ("09:00", "Review")])
+
+    def test_hourly_forecast_parses_rain_probability(self):
+        resp = {"service_response": {"weather.home": {"forecast": [
+            {"datetime": "2026-07-19T18:00:00+00:00", "precipitation_probability": 40},
+            {"datetime": "2026-07-19T19:00:00+00:00", "precipitation_probability": 72.6},
+            {"datetime": "2026-07-19T20:00:00+00:00"},
+            {"precipitation_probability": 10},
+        ]}}}
+        result = app.parse_hourly(resp, "weather.home")
+        self.assertEqual([pct for _, pct in result], [40, 73, None])
+        self.assertEqual(result[0][0], NOW)
+        self.assertIsNone(app.parse_hourly(None, "weather.home"))
+        self.assertIsNone(app.parse_hourly(resp, "weather.other"))
+
+    def test_open_meteo_parses_rain_probability(self):
+        data = {"hourly": {
+            "time": [int(NOW.timestamp()), int(NOW.timestamp()) + 3600],
+            "precipitation_probability": [41, None],
+        }}
+        result = app.parse_open_meteo(data)
+        self.assertEqual([pct for _, pct in result], [41, None])
+        self.assertEqual(result[0][0], NOW)
+        self.assertIsNone(app.parse_open_meteo({}))
+
+    def test_hourly_falls_back_to_open_meteo_without_probability(self):
+        # Met.no-style hourly forecast: rain amount, no probability.
+        ha_hourly = {"service_response": {"weather.home": {"forecast": [
+            {"datetime": "2026-07-19T18:00:00+00:00", "precipitation": 0.4},
+        ]}}}
+        meteo = [(NOW, 55)]
+
+        def fake_ha(method, path, body=None, **params):
+            return ha_hourly if path.endswith("get_forecasts") else {"latitude": 1, "longitude": 2}
+
+        with (
+            mock.patch.object(app, "HA_WEATHER_ENTITY", "weather.home"),
+            mock.patch.object(app, "_ha", side_effect=fake_ha),
+            mock.patch.object(app, "requests") as req,
+            mock.patch.object(app, "parse_open_meteo", return_value=meteo),
+        ):
+            self.assertEqual(app.fetch_hourly(), meteo)
+        params = req.get.call_args.kwargs["params"]
+        self.assertEqual((params["latitude"], params["longitude"]), (1, 2))
+
+    def test_open_meteo_window_covers_rain_hours_late_in_the_day(self):
+        sao_paulo = zoneinfo.ZoneInfo("America/Sao_Paulo")
+        for rain_hours in (12, 24):
+            for now in (
+                datetime(2026, 7, 19, 23, 0, tzinfo=timezone.utc),
+                datetime(2026, 7, 19, 23, 0, tzinfo=sao_paulo),  # 02:00Z next day
+                datetime(2026, 7, 19, 20, 30, tzinfo=sao_paulo),  # 23:30Z
+            ):
+                with (
+                    mock.patch.object(app, "RAIN_HOURS", rain_hours),
+                    mock.patch.object(app, "RAIN_LAT", "1"),
+                    mock.patch.object(app, "RAIN_LON", "2"),
+                    mock.patch.object(app, "requests") as req,
+                    mock.patch.object(app, "datetime", wraps=datetime) as dt,
+                ):
+                    dt.now.return_value = now
+                    app.fetch_open_meteo()
+                days = req.get.call_args.kwargs["params"]["forecast_days"]
+                # The response starts at 00:00 of the current UTC day.
+                utc = now.astimezone(timezone.utc)
+                end = utc.replace(hour=0, minute=0) + timedelta(days=days)
+                last = utc.replace(minute=0) + timedelta(hours=rain_hours - 1)
+                self.assertGreater(end - timedelta(hours=1), last, (rain_hours, now))
+
+    def test_rain_chart_skips_past_hours(self):
+        now = datetime.now(app.TZINFO).replace(minute=0, second=0, microsecond=0)
+        past = [(now - timedelta(hours=2), 100), (now - timedelta(hours=1), 100)]
+        image = Image.new("L", (400, 120), 255)
+        draw = ImageDraw.Draw(image)
+        with mock.patch.dict(app.HA_DATA, {"hourly": past + [(now, 0)]}):
+            app.w_rain(draw, (0, 0, 400, 120))
+        # The first column is the current 0% hour, not a past 100% one: the
+        # inside of its bar stays white.
+        self.assertEqual(image.getpixel((16, 70)), 255)
+
+    def test_rain_chart_labels_fit_their_columns(self):
+        now = datetime.now(app.TZINFO).replace(minute=0, second=0, microsecond=0)
+        box = (0, 0, 468, 103)  # the rain box in a 1024x758 frame
+        for rain_hours in (12, 20, 24, 48):
+            hourly = [(now + timedelta(hours=i), 100 if i % 2 else 7) for i in range(rain_hours)]
+            draw = ImageDraw.Draw(Image.new("L", box[2:], 255))
+            with (
+                mock.patch.object(app, "RAIN_HOURS", rain_hours),
+                mock.patch.dict(app.HA_DATA, {"hourly": hourly}),
+                mock.patch.object(draw, "text", wraps=draw.text) as text,
+            ):
+                app.w_rain(draw, box)
+            cw = box[2] / rain_hours
+            hour_spans, pct_count = [], 0
+            for call in text.call_args_list[1:]:  # [0] is the title
+                (cx, ty), label = call.args
+                left, _, right, _ = draw.textbbox((cx, ty), label, font=call.kwargs["font"], anchor="ma")
+                if label.endswith("%"):
+                    pct_count += 1
+                    i = int(cx // cw)
+                    self.assertGreaterEqual(left, i * cw, (rain_hours, label))
+                    self.assertLessEqual(right, (i + 1) * cw, (rain_hours, label))
+                else:
+                    hour_spans.append((left, right))
+            # Hour labels keep a visible gap between them.
+            for (_, prev_right), (next_left, _) in zip(hour_spans, hour_spans[1:]):
+                self.assertGreaterEqual(next_left - prev_right, 3, rain_hours)
+            if rain_hours == 12:
+                # The default chart keeps a value and an hour on every column.
+                self.assertEqual((pct_count, len(hour_spans)), (12, 12))
 
     def test_empty_fixture_render_is_deterministic_png(self):
         widgets = app.DASH_WIDGETS
