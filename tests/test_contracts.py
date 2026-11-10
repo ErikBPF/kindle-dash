@@ -49,7 +49,7 @@ class ParserContract(unittest.TestCase):
 
     def test_opencode_fixture(self):
         result = app.parse_opencode_usage(
-            (FIXTURES / "opencode-usage.html").read_text(), now=NOW
+            self.fixture_json("opencode-usage.json"), now=NOW
         )
         self.assertEqual(
             (result["fivehr_pct"], result["week_pct"], result["month_pct"]),
@@ -57,9 +57,9 @@ class ParserContract(unittest.TestCase):
         )
         self.assertEqual(result["updated"], NOW.isoformat())
 
-    def test_opencode_markup_drift_fails_closed(self):
-        with self.assertRaisesRegex(RuntimeError, "no usage windows found"):
-            app.parse_opencode_usage("<html>changed dashboard</html>", now=NOW)
+    def test_opencode_missing_meters_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "no usage meters found"):
+            app.parse_opencode_usage({"access": {"meters": {}}}, now=NOW)
 
     def test_openrouter_fixture_sums_month_across_keys(self):
         keys = self.fixture_json("openrouter-keys.json")["data"]

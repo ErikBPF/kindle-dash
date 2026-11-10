@@ -75,16 +75,16 @@ limit is reached. Rotated tokens persist to `/data/codex_tokens.json`;
 
 ## opencode Go usage (5h / Week / Month)
 
-Optional, and **fragile**: opencode has no usage API (tracked upstream — [Go #16017](https://github.com/anomalyco/opencode/issues/16017)), so this **scrapes the Go dashboard HTML** with your browser session cookie. The cookie expires (days) with no refresh path — when it dies the panel shows `(stale)` until you re-seed it. Add `opencode` to `DASH_WIDGETS`.
+Optional, and **fragile**: this calls the console API behind the Go dashboard (`/console/api/go/status`) with your browser's console session cookie. The cookie expires (days) with no refresh path — when it dies the panel shows `(stale)` until you re-seed it. Add `opencode` to `DASH_WIDGETS`.
 
 | Var | Default | Notes |
 |---|---|---|
 | `OPENCODE_WORKSPACE_ID` | — | the `wrk_…` in the dashboard URL `/workspace/<id>/go`. Blank = panel off. |
-| `OPENCODE_AUTH_COOKIE` | — | the `auth` cookie for `opencode.ai` (DevTools → Application → Cookies). Re-seed when it expires. |
-| `OPENCODE_POLL_MIN` | `15` | minutes between scrapes |
-| `OPENCODE_GO_URL` | `https://opencode.ai/workspace/{ws}/go` | dashboard URL template (`{ws}` = workspace id) |
+| `OPENCODE_AUTH_COOKIE` | — | the `__Host-console_session` cookie for `opencode.ai` (DevTools → Application → Cookies), or the whole `name=value` pair. Re-seed when it expires. |
+| `OPENCODE_POLL_MIN` | `15` | minutes between polls |
+| `OPENCODE_STATUS_URL` | `https://opencode.ai/console/api/go/status` | usage API, polled with the `x-org-id` workspace header |
 
-Parses the `rollingUsage` / `weeklyUsage` / `monthlyUsage` objects (`usagePercent` + `resetInSec`) embedded in the page. If opencode changes the dashboard markup this breaks — the panel then renders `(stale)`/`usage n/a`, never a broken frame.
+Reads the `fiveHour` / `week` / `month` meters (`usedMicroCents` over `limitMicroCents`, `resetsAt`). If opencode changes the API this breaks — the panel then renders `(stale)`/`usage n/a`, never a broken frame.
 
 ## OpenRouter monthly spend (Month USD)
 

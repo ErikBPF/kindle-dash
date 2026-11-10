@@ -1,0 +1,27 @@
+{
+  "subscriberUserId": "acc_fixture",
+  "product": "go",
+  "access": {
+    "startsAt": "2026-07-01T00:00:00.000Z",
+    "endsAt": "2026-08-01T00:00:00.000Z",
+    "meters": {
+      "fiveHour": {
+        "startsAt": "2026-07-19T13:00:00.000Z",
+        "resetsAt": "2026-07-19T18:30:00.000Z",
+        "limitMicroCents": "1000000000",
+        "usedMicroCents": "314000000"
+      },
+      "week": {
+        "startsAt": "2026-07-13T00:00:00.000Z",
+        "resetsAt": "2026-07-20T00:00:00.000Z",
+        "limitMicroCents": "1000000000",
+        "usedMicroCents": "526000000"
+      },
+      "month": {
+        "resetsAt": "2026-08-01T00:00:00.000Z",
+        "limitMicroCents": "1000000000",
+        "usedMicroCents": "701000000"
+      }
+    }
+  }
+}

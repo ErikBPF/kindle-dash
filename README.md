@@ -86,7 +86,7 @@ Then set up the device (jailbreak, `dashboard.sh`, KUAL Start/Stop). Full walkth
 Claude, Codex, and opencode lean on **unofficial** plumbing; OpenRouter uses its documented API but needs a powerful key. All are opt-in and disappear when unconfigured:
 
 - **Claude & Codex** call undocumented OAuth usage endpoints with a token the renderer refreshes itself. Give the dashboard its **own** login for each (not your laptop's) — refresh tokens rotate, and sharing one lineage eventually logs the other out.
-- **opencode** has **no usage API at all**, so that panel scrapes the Go dashboard HTML with a browser session cookie. The cookie expires every few days with no refresh path — re-grab it with `tools/opencode-capture.py` when the panel goes `(stale)`.
+- **opencode** calls the console API behind the Go dashboard with a browser session cookie. The cookie expires every few days with no refresh path — re-grab it with `tools/opencode-capture.py` when the panel goes `(stale)`.
 - **OpenRouter** needs a **management** key to sum spend across all keys — it can also create and delete keys, so give the dashboard its own and keep it secret.
 
 The whole story (and how to seed each safely) is in [SECURITY.md](SECURITY.md).
