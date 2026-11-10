@@ -2,13 +2,13 @@
 """opencode-capture — pull OpenCode Go dashboard credentials from a logged-in
 Chromium-family browser (Brave/Chromium/Chrome/Edge/Vivaldi) on Linux.
 
-OpenCode exposes no usage API, so the kindle-dash `opencode` widget scrapes the
-Go usage API, which needs a workspace id + the console session cookie
-`__Host-console_session` (see CONFIGURATION.md). That cookie is HttpOnly and
-expires after a few days, so
-re-grabbing it by hand via DevTools gets old fast. This reads it straight from
-the browser's encrypted cookie store the way opencode-bar does — re-run it
-whenever the widget goes "(stale)".
+OpenCode exposes no documented usage API, so the kindle-dash `opencode` widget
+reads its meters from the console endpoint, which needs a workspace id + the
+console session cookie `__Host-console_session` (see CONFIGURATION.md). That
+cookie is HttpOnly and expires after a few days, so re-grabbing it by hand via
+DevTools gets old fast. This reads it straight from the browser's encrypted
+cookie store the way opencode-bar does — re-run it whenever the widget goes
+"(stale)".
 
   python3 tools/opencode-capture.py            # print the two env lines
   python3 tools/opencode-capture.py -o creds.env   # append them to a file

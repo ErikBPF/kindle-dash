@@ -80,7 +80,7 @@ Optional, and **fragile**: this calls the console API behind the Go dashboard (`
 | Var | Default | Notes |
 |---|---|---|
 | `OPENCODE_WORKSPACE_ID` | — | the `wrk_…` in the dashboard URL `/workspace/<id>/go`. Blank = panel off. |
-| `OPENCODE_AUTH_COOKIE` | — | the `__Host-console_session` cookie for `opencode.ai` (DevTools → Application → Cookies), or the whole `name=value` pair. Re-seed when it expires. |
+| `OPENCODE_AUTH_COOKIE` | — | the `__Host-console_session` cookie for `opencode.ai` (DevTools → Application → Cookies), or the whole `__Host-console_session=…` pair. Re-seed when it expires. |
 | `OPENCODE_POLL_MIN` | `15` | minutes between polls |
 | `OPENCODE_STATUS_URL` | `https://opencode.ai/console/api/go/status` | usage API, polled with the `x-org-id` workspace header |
 

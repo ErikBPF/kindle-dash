@@ -676,7 +676,7 @@ def parse_opencode_usage(payload, now=None):
 
 def fetch_opencode_once():
     cookie = OPENCODE_AUTH_COOKIE
-    if "=" not in cookie:
+    if not cookie.startswith("__Host-console_session="):
         cookie = f"__Host-console_session={cookie}"
     r = requests.get(
         OPENCODE_STATUS_URL,

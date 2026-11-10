@@ -55,11 +55,52 @@ class ParserContract(unittest.TestCase):
             (result["fivehr_pct"], result["week_pct"], result["month_pct"]),
             (31, 53, 70),
         )
+        with mock.patch.object(app, "TZINFO", timezone.utc):
+            result = app.parse_opencode_usage(
+                self.fixture_json("opencode-usage.json"), now=NOW
+            )
+        self.assertEqual(
+            (result["fivehr_reset"], result["week_reset"], result["month_reset"]),
+            ("Jul 19, 18:30", "Jul 20, 00:00", "Aug 01, 00:00"),
+        )
         self.assertEqual(result["updated"], NOW.isoformat())
 
     def test_opencode_missing_meters_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "no usage meters found"):
             app.parse_opencode_usage({"access": {"meters": {}}}, now=NOW)
+
+    def test_opencode_malformed_reset_degrades_to_empty(self):
+        payload = self.fixture_json("opencode-usage.json")
+        payload["access"]["meters"]["week"]["resetsAt"] = "not-a-date"
+        result = app.parse_opencode_usage(payload, now=NOW)
+        self.assertEqual(result["week_pct"], 53)
+        self.assertEqual(result["week_reset"], "")
+
+    def test_opencode_cookie_forms(self):
+        captured = {}
+
+        class Response:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return json.loads((FIXTURES / "opencode-usage.json").read_text())
+
+        def fake_get(url, headers=None, timeout=None):
+            captured.update(url=url, headers=headers)
+            return Response()
+
+        cases = (
+            ("abc=", "__Host-console_session=abc="),
+            ("__Host-console_session=xyz", "__Host-console_session=xyz"),
+        )
+        for value, expected in cases:
+            with mock.patch.object(app, "OPENCODE_AUTH_COOKIE", value), \
+                    mock.patch.object(app, "OPENCODE_WORKSPACE_ID", "wrk_test"), \
+                    mock.patch.object(app.requests, "get", fake_get):
+                app.fetch_opencode_once()
+            self.assertEqual(captured["headers"]["Cookie"], expected)
+            self.assertEqual(captured["headers"]["x-org-id"], "wrk_test")
 
     def test_openrouter_fixture_sums_month_across_keys(self):
         keys = self.fixture_json("openrouter-keys.json")["data"]
