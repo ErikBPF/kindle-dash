@@ -37,7 +37,7 @@ Use at most one release label:
 
 - `release:major`, `release:minor`, or `release:patch` selects that SemVer bump.
 - `release:none` skips publication.
-- No release label defaults to a minor bump.
+- No release label publishes nothing; add one explicitly.
 - Conflicting release labels fail closed without publishing.
 
 CI must pass before merge. The release workflow publishes the amd64 image by
