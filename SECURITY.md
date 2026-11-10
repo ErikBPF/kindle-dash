@@ -32,13 +32,13 @@ jq -r .tokens.refresh_token ~/dash-codex-auth/auth.json
 
 Put that in `CODEX_REFRESH_TOKEN`; rotations persist to `/data/codex_tokens.json`. The `ChatGPT-Account-Id` header is auto-derived from the id_token JWT — only set `CODEX_ACCOUNT_ID` if the usage call 401s.
 
-## opencode Go — no API, so it scrapes (and the cookie expires)
+## opencode Go — console API with a session cookie that expires
 
-opencode exposes **no usage API** ([upstream request #16017](https://github.com/anomalyco/opencode/issues/16017)). The panel fetches the Go dashboard HTML, authenticated by your browser's `auth` **session cookie**, and parses the usage out of it. Consequences:
+opencode exposes no documented usage API ([upstream request #16017](https://github.com/anomalyco/opencode/issues/16017)); the panel calls the console endpoint behind the Go dashboard, authenticated by your browser's `__Host-console_session` **session cookie**. Consequences:
 
 - The cookie is **HttpOnly and short-lived** (days), with **no refresh path** — when it expires the panel goes `(stale)`. Re-grab and re-seed.
 - `tools/opencode-capture.py` reads the cookie straight from your browser's encrypted cookie store (Brave/Chromium-family, via the OS keyring) and pulls the workspace id from history — no DevTools. Re-run it whenever the panel goes stale.
-- It's markup-dependent: if opencode changes the dashboard, the panel fails soft to `usage n/a`, never a broken frame.
+- It's API-dependent: if opencode changes the console endpoint, the panel fails soft to `usage n/a`, never a broken frame.
 
 Set `OPENCODE_WORKSPACE_ID` + `OPENCODE_AUTH_COOKIE` (both opt-in; blank = panel off).
 

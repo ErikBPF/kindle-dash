@@ -60,7 +60,7 @@ Return shapes to match: weather `(condition, temp, feels)` · forecast `[(label,
 
 Clock · Weather (now) · Forecast (N-day) · Rain (HA hourly forecast, chance per hour) · Agenda (one or more HA calendars) · Sun (HA sunrise/sunset) · Kindle battery (sent by the device) · Claude usage (5h/7d/Extra) · Codex usage (available windows/Credits) · opencode Go usage (5h/Week/Month) · OpenRouter spend (Month USD).
 
-The four usage providers (`usage`=Claude, `codex`, `opencode`, `openrouter`) share one `_usage_block` renderer and split the bottom strip into a column each. Claude and Codex read OAuth usage APIs (refresh-token seeded); OpenRouter sums `usage_monthly` over all keys with a management key; **opencode has no usage API, so its widget scrapes the Go dashboard HTML** with a browser cookie — see CONFIGURATION.md for the fragility caveat.
+The four usage providers (`usage`=Claude, `codex`, `opencode`, `openrouter`) share one `_usage_block` renderer and split the bottom strip into a column each. Claude and Codex read OAuth usage APIs (refresh-token seeded); OpenRouter sums `usage_monthly` over all keys with a management key; **opencode reads its meters from the console API behind the Go dashboard** with a browser session cookie — see CONFIGURATION.md for the fragility caveat.
 
 ## Roadmap — proposed widgets
 

@@ -21,11 +21,9 @@ fetches fail soft: a missing source renders a placeholder, never a broken image.
 """
 import base64
 import functools
-import html
 import json
 import math
 import os
-import re
 import threading
 import time
 import zoneinfo
@@ -111,13 +109,15 @@ CODEX_POLL_MIN = int(os.environ.get("CODEX_POLL_MIN", "15"))
 CODEX_USAGE_FILE = os.path.join(STATE_DIR, "codex_usage.json")
 CODEX_TOKEN_FILE = os.path.join(STATE_DIR, "codex_tokens.json")
 
-# opencode Go usage (optional) — opencode exposes NO usage API (see WIDGETS.md),
-# so this scrapes the Go dashboard HTML, authenticated by a browser `auth`
-# cookie. The cookie expires (days) with no refresh path: when it dies the
-# widget renders "(stale)" until OPENCODE_AUTH_COOKIE is re-seeded.
+# opencode Go usage (optional) — read from the authenticated console API, which
+# reports the five-hour, weekly, and monthly subscription meters. Auth is the
+# browser's HttpOnly console session cookie (days, no refresh path): when it
+# dies the widget renders "(stale)" until OPENCODE_AUTH_COOKIE is re-seeded.
 OPENCODE_WORKSPACE_ID = os.environ.get("OPENCODE_WORKSPACE_ID", "")
 OPENCODE_AUTH_COOKIE = os.environ.get("OPENCODE_AUTH_COOKIE", "")
-OPENCODE_GO_URL = os.environ.get("OPENCODE_GO_URL", "https://opencode.ai/workspace/{ws}/go")
+OPENCODE_STATUS_URL = os.environ.get(
+    "OPENCODE_STATUS_URL", "https://opencode.ai/console/api/go/status"
+)
 OPENCODE_USER_AGENT = os.environ.get(
     "OPENCODE_USER_AGENT",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -642,50 +642,50 @@ def fetch_codex_usage_once():
     return parse_codex_usage(r.json())
 
 
-# --- opencode Go usage: scrape the dashboard HTML (no API exists) -----------
-def _oc_window(name, text):
-    """Pull (usagePercent, resetInSec) out of a named dashboard usage object."""
-    m = re.search(name + r'["\']?\s*:\s*(?:\$R\[\d+\]\s*=\s*)?\{([^{}]*)\}', text, re.S)
-    if not m:
-        return None, None
-    body = m.group(1)
-
-    def num(field):
-        mm = re.search(field + r'["\']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?', body)
-        return float(mm.group(1)) if mm else None
-
-    return num("usagePercent"), num("resetInSec")
+# --- opencode Go usage: subscription meters from the console API -----------
+def _iso_epoch(value):
+    """Parse an ISO-8601 timestamp to epoch seconds, or None."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
-def parse_opencode_usage(text, now=None):
-    """Normalize one OpenCode dashboard response without network or cookies."""
-    text = html.unescape(text).replace('\\"', '"').replace("\\u0022", '"')
+def parse_opencode_usage(payload, now=None):
+    """Normalize one console go-status response without network or cookies."""
     now = now or datetime.now(timezone.utc)
+    meters = (payload.get("access") or {}).get("meters") or {}
     rec: dict = {"updated": now.isoformat()}
     found = False
-    for field, key in (("rollingUsage", "fivehr"), ("weeklyUsage", "week"), ("monthlyUsage", "month")):
-        up, rs = _oc_window(field, text)
-        if up is None:
+    for field, key in (("fiveHour", "fivehr"), ("week", "week"), ("month", "month")):
+        meter = meters.get(field) or {}
+        try:
+            used = float(meter["usedMicroCents"])
+            limit = float(meter["limitMicroCents"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if limit <= 0:
             continue
         found = True
-        rec[f"{key}_pct"] = round(up)
-        rec[f"{key}_reset"] = _reset_fmt(seconds=rs, now=now) if rs else ""
+        rec[f"{key}_pct"] = round(used / limit * 100)
+        rec[f"{key}_reset"] = _reset_fmt(at=_iso_epoch(meter.get("resetsAt")), now=now)
     if not found:
-        raise RuntimeError("no usage windows found (cookie expired or dashboard markup changed)")
+        raise RuntimeError("no usage meters found (session cookie expired or API changed)")
     return rec
 
 
 def fetch_opencode_once():
-    url = OPENCODE_GO_URL.format(ws=OPENCODE_WORKSPACE_ID)
-    cookie = OPENCODE_AUTH_COOKIE if "auth=" in OPENCODE_AUTH_COOKIE else f"auth={OPENCODE_AUTH_COOKIE}"
+    cookie = OPENCODE_AUTH_COOKIE
+    if not cookie.startswith("__Host-console_session="):
+        cookie = f"__Host-console_session={cookie}"
     r = requests.get(
-        url,
+        OPENCODE_STATUS_URL,
         headers={"Cookie": cookie, "User-Agent": OPENCODE_USER_AGENT,
-                 "Accept": "text/html,application/xhtml+xml"},
+                 "Accept": "application/json", "x-org-id": OPENCODE_WORKSPACE_ID},
         timeout=15,
     )
     r.raise_for_status()
-    return parse_opencode_usage(r.text)
+    return parse_opencode_usage(r.json())
 
 
 # --- OpenRouter usage: sum this month's spend across all API keys ----------

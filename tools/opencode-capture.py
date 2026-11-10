@@ -2,12 +2,13 @@
 """opencode-capture — pull OpenCode Go dashboard credentials from a logged-in
 Chromium-family browser (Brave/Chromium/Chrome/Edge/Vivaldi) on Linux.
 
-OpenCode exposes no usage API, so the kindle-dash `opencode` widget scrapes the
-Go dashboard, which needs a workspace id + the site's `auth` session cookie
-(see CONFIGURATION.md). That cookie is HttpOnly and rotates every few days, so
-re-grabbing it by hand via DevTools gets old fast. This reads it straight from
-the browser's encrypted cookie store the way opencode-bar does — re-run it
-whenever the widget goes "(stale)".
+OpenCode exposes no documented usage API, so the kindle-dash `opencode` widget
+reads its meters from the console endpoint, which needs a workspace id + the
+console session cookie `__Host-console_session` (see CONFIGURATION.md). That
+cookie is HttpOnly and expires after a few days, so re-grabbing it by hand via
+DevTools gets old fast. This reads it straight from the browser's encrypted
+cookie store the way opencode-bar does — re-run it whenever the widget goes
+"(stale)".
 
   python3 tools/opencode-capture.py            # print the two env lines
   python3 tools/opencode-capture.py -o creds.env   # append them to a file
@@ -111,14 +112,14 @@ def capture():
             rows = _query(
                 cookies,
                 f"SELECT encrypted_value FROM cookies "
-                f"WHERE host_key LIKE '%{HOST}%' AND name='auth'",
+                f"WHERE host_key LIKE '%{HOST}%' AND name='__Host-console_session'",
             )
             if not rows:
                 continue
             secret = _keyring_secret(app)
             value = _decrypt(rows[0][0], secret)
             if not value:
-                print(f"[{app}/{os.path.basename(prof)}] found auth cookie but "
+                print(f"[{app}/{os.path.basename(prof)}] found session cookie but "
                       f"could not decrypt (keyring locked?)", file=sys.stderr)
                 continue
             # workspace id from this profile's browsing history
@@ -143,7 +144,7 @@ def main():
 
     res = capture()
     if not res:
-        print(f"No '{HOST}' auth cookie found in any Chromium-family browser. "
+        print(f"No '{HOST}' console session cookie found in any Chromium-family browser. "
               f"Log in at https://{HOST} (and open the Go dashboard once), then "
               f"re-run.", file=sys.stderr)
         sys.exit(1)
